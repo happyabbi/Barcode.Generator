@@ -22,6 +22,11 @@ steps:
 
 - task: DotNetCoreCLI@2
   inputs:
+    command: test
+    projects: '**/Barcode.Generator.Tests.csproj'
+
+- task: DotNetCoreCLI@2
+  inputs:
     command: pack
     configuration: 'release'
     packagesToPack: '**/Barcode.Generator.csproj'
