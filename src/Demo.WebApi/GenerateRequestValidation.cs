@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Demo.WebApi;
 
 public static class GenerateRequestValidation
@@ -7,7 +9,7 @@ public static class GenerateRequestValidation
     public const int MinDimension = 64;
     public const int MaxDimension = 2048;
 
-    public static IDictionary<string, string[]> Validate(string? text, int? width, int? height)
+    public static IDictionary<string, string[]> Validate(string text, int? width, int? height)
     {
         var errors = new Dictionary<string, string[]>();
 
