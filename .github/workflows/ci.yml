@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - release
+      - feat/**
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+
+      - name: Restore
+        run: dotnet restore src/Barcode.Generator.sln
+
+      - name: Build
+        run: dotnet build src/Barcode.Generator.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test src/Barcode.Generator.sln --configuration Release --no-build

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright 2019 Nicolò Carandini
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,125 +13,80 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
- using System;
+
+using System;
 
 namespace Barcode.Generator.Rendering
 {
     public static class BitmapConverter
     {
-        static readonly int BMP_HEADER_LENGHT = 14 + 40; // As a sum of the lenght of the Header first part and the lenght of the DIB Header part
-        static readonly short BMP_HEADER_FIELD = 19778; // as Litte endian: 0x42 0x4D
+        private const int BmpHeaderLength = 14 + 40; // Header + DIB Header (BITMAPINFOHEADER)
+        private const short BmpHeaderField = 19778; // Little endian: 0x42 0x4D ("BM")
 
         public static byte[] FromPixelData(PixelData pixelData)
         {
             if (pixelData == null)
             {
-                throw new ArgumentNullException("PixelData can't be null");
+                throw new ArgumentNullException(nameof(pixelData), "PixelData can't be null");
             }
 
-            byte[] bmpBytes = new byte[pixelData.Pixels.Length + BMP_HEADER_LENGHT];
+            var expectedPixelLength = pixelData.Width * pixelData.Height * 4;
+            if (pixelData.Pixels == null || pixelData.Pixels.Length != expectedPixelLength)
+            {
+                throw new ArgumentException(
+                    $"Invalid pixel buffer length. Expected {expectedPixelLength} bytes, got {pixelData.Pixels?.Length ?? 0}.",
+                    nameof(pixelData));
+            }
+
+            byte[] bmpBytes = new byte[pixelData.Pixels.Length + BmpHeaderLength];
             int writePointer = 0;
 
             // == HEADER ==
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, BmpHeaderField);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, bmpBytes.Length);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, BmpHeaderLength);
 
-            // Write the Headerfield
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, BMP_HEADER_FIELD);
+            // == DIB header (BITMAPINFOHEADER) ==
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 40);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, pixelData.Width);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, pixelData.Height);
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, 1);
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, 32);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 3780);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 3780);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
 
-            // Write the size of the BMP file
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, bmpBytes.Length);
-
-            // Write the two reserved (and tipically unused) values that we set as 0x00 0x00 0x00 0x00 (i.e. 0, whom defaul .NET type is int32)
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-
-            // Write the offset, i.e. starting address, of the byte where the bitmap image data (pixel array) can be found
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, BMP_HEADER_LENGHT);
-
-            // == DIB header (bitmap information header) of type BITMAPINFOHEADER ==
-
-            // Write The size of this header
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 40);
-
-            // Write the bitmap width in pixels(signed integer)
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, pixelData.Width);
-
-            // Write the bitmap height in pixels(signed integer)
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, pixelData.Height);
-
-            // Write the number of color planes (must be 1, as a signed short value)
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, (short)1);
-
-            // Write the number of bits per pixel, which is the color depth of the image. here we use 32 because every pixel is 4 bytes long.
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, (short)32); 
-
-            // Write the compression method being used. We don't use it so we set it to BI_RGB (None = 0)
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-
-            // Write the image size. This is the size of the raw bitmap data; a dummy 0 can be given for BI_RGB bitmaps
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-
-            // Write the horizontal resolution of the image. At 96 DPI * 39.3701 inches per metre = 3780 pixel per metre
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 3780);
-
-            // Write the vertical resolution of the image. At 96 DPI * 39.3701 inches per metre = 3780 pixel per metre
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 3780);
-
-            // Write the number of colors in the color palette, or 0 to default to 2n
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-
-            // Write the number of important colors used, or 0 when every color is important; generally ignored
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-
-            // == BITMAP
-            byte[] pixel = new byte[4];
-
-            // We need to read from left to right and from bottom to top
-            for (int rowIndex = pixelData.Height -1; rowIndex >= 0; rowIndex--)
+            // == PIXEL ARRAY ==
+            // BMP stores rows from bottom to top.
+            var rowStride = pixelData.Width * 4;
+            for (int rowIndex = pixelData.Height - 1; rowIndex >= 0; rowIndex--)
             {
-                for (int colIndex = 0; colIndex < pixelData.Width; colIndex++)
-                {
-                    int pixelStartIndex = (rowIndex * pixelData.Width + colIndex) * 4; // because every pixel is 4 bytes long
-
-                    pixel[0] = pixelData.Pixels[pixelStartIndex];
-                    pixel[1] = pixelData.Pixels[pixelStartIndex + 1];
-                    pixel[2] = pixelData.Pixels[pixelStartIndex + 2];
-                    pixel[3] = pixelData.Pixels[pixelStartIndex + 3];
-
-                    // Write the pixel data
-                    writePointer = WriteByteArray(ref bmpBytes, writePointer, pixel);
-                }
+                var sourceOffset = rowIndex * rowStride;
+                Buffer.BlockCopy(pixelData.Pixels, sourceOffset, bmpBytes, writePointer, rowStride);
+                writePointer += rowStride;
             }
-            
 
-            // Return the result
             return bmpBytes;
         }
 
-        static int WriteByteArray(ref byte[] byteArray, int index, byte value)
+        private static int WriteInt16LittleEndian(byte[] byteArray, int index, int value)
         {
-            byteArray[index] = value;
-            return index + 1;
-        }
-
-        static int WriteByteArray(ref byte[] byteArray, int index, short value)
-        {
-            var valueArray = BitConverter.GetBytes(value);
-            Buffer.BlockCopy(valueArray, 0, byteArray, index, 2);
+            byteArray[index] = (byte)value;
+            byteArray[index + 1] = (byte)(value >> 8);
             return index + 2;
         }
 
-        static int WriteByteArray(ref byte[] byteArray, int index, int value)
+        private static int WriteInt32LittleEndian(byte[] byteArray, int index, int value)
         {
-            var valueArray = BitConverter.GetBytes(value);
-            Buffer.BlockCopy(valueArray, 0, byteArray, index, 4);
+            byteArray[index] = (byte)value;
+            byteArray[index + 1] = (byte)(value >> 8);
+            byteArray[index + 2] = (byte)(value >> 16);
+            byteArray[index + 3] = (byte)(value >> 24);
             return index + 4;
         }
-
-        static int WriteByteArray(ref byte[] byteArray, int index, byte[] pixelValue)
-        {
-            Buffer.BlockCopy(pixelValue, 0, byteArray, index, 4);
-            return index + 4;
-        }
-
     }
 }

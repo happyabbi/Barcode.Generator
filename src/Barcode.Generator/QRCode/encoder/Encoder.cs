@@ -291,7 +291,7 @@ namespace Barcode.Generator.QrCode.Internal
             {
                 bytes = Encoding.GetEncoding("Shift_JIS").GetBytes(content);
             }
-            catch (Exception)
+            catch (ArgumentException)
             {
                 return false;
             }
@@ -739,9 +739,13 @@ namespace Barcode.Generator.QrCode.Internal
             }
          }
 #endif
-            catch (Exception uee)
+            catch (EncoderFallbackException ex)
             {
-                throw new WriterException(uee.Message, uee);
+                throw new WriterException(ex.Message, ex);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new WriterException(ex.Message, ex);
             }
             foreach (byte b in bytes)
             {
@@ -756,9 +760,13 @@ namespace Barcode.Generator.QrCode.Internal
             {
                 bytes = Encoding.GetEncoding("Shift_JIS").GetBytes(content);
             }
-            catch (Exception uee)
+            catch (EncoderFallbackException ex)
             {
-                throw new WriterException(uee.Message, uee);
+                throw new WriterException(ex.Message, ex);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new WriterException(ex.Message, ex);
             }
             int length = bytes.Length;
             for (int i = 0; i < length; i += 2)
