@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright 2019 Nicolò Carandini
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -42,23 +42,23 @@ namespace Barcode.Generator.Rendering
             int writePointer = 0;
 
             // == HEADER ==
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, BmpHeaderField);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, bmpBytes.Length);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, BmpHeaderLength);
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, BmpHeaderField);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, bmpBytes.Length);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, BmpHeaderLength);
 
             // == DIB header (BITMAPINFOHEADER) ==
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 40);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, pixelData.Width);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, pixelData.Height);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, (short)1);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, (short)32);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 3780);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 3780);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
-            writePointer = WriteByteArray(ref bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 40);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, pixelData.Width);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, pixelData.Height);
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, 1);
+            writePointer = WriteInt16LittleEndian(bmpBytes, writePointer, 32);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 3780);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 3780);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
+            writePointer = WriteInt32LittleEndian(bmpBytes, writePointer, 0);
 
             // == PIXEL ARRAY ==
             // BMP stores rows from bottom to top.
@@ -73,23 +73,19 @@ namespace Barcode.Generator.Rendering
             return bmpBytes;
         }
 
-        static int WriteByteArray(ref byte[] byteArray, int index, byte value)
+        private static int WriteInt16LittleEndian(byte[] byteArray, int index, int value)
         {
-            byteArray[index] = value;
-            return index + 1;
-        }
-
-        static int WriteByteArray(ref byte[] byteArray, int index, short value)
-        {
-            var valueArray = BitConverter.GetBytes(value);
-            Buffer.BlockCopy(valueArray, 0, byteArray, index, 2);
+            byteArray[index] = (byte)value;
+            byteArray[index + 1] = (byte)(value >> 8);
             return index + 2;
         }
 
-        static int WriteByteArray(ref byte[] byteArray, int index, int value)
+        private static int WriteInt32LittleEndian(byte[] byteArray, int index, int value)
         {
-            var valueArray = BitConverter.GetBytes(value);
-            Buffer.BlockCopy(valueArray, 0, byteArray, index, 4);
+            byteArray[index] = (byte)value;
+            byteArray[index + 1] = (byte)(value >> 8);
+            byteArray[index + 2] = (byte)(value >> 16);
+            byteArray[index + 3] = (byte)(value >> 24);
             return index + 4;
         }
     }

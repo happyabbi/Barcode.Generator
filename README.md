@@ -18,6 +18,52 @@
 - `src/Demo.WebApi`：ASP.NET Core Minimal API 範例，提供條碼產生端點
 - `src/Barcode.Generator.Tests`：xUnit 測試專案
 
+## 快速開始（Library API）
+
+### 1) 產生 QR Code 像素資料
+
+```csharp
+using Barcode.Generator;
+using Barcode.Generator.Rendering;
+
+var writer = new BarcodeWriterPixelData
+{
+    Format = BarcodeFormat.QR_CODE,
+    Options = new Common.EncodingOptions
+    {
+        Width = 300,
+        Height = 300,
+        Margin = 1
+    }
+};
+
+PixelData pixelData = writer.Write("Hello Barcode");
+```
+
+### 2) 轉成 BMP 位元組並寫檔
+
+```csharp
+byte[] bmpBytes = BitmapConverter.FromPixelData(pixelData);
+File.WriteAllBytes("qrcode.bmp", bmpBytes);
+```
+
+### 3) 常見錯誤處理
+
+```csharp
+try
+{
+    byte[] bmpBytes = BitmapConverter.FromPixelData(pixelData);
+}
+catch (ArgumentNullException ex)
+{
+    // pixelData 為 null
+}
+catch (ArgumentException ex)
+{
+    // 像素緩衝區長度與 Width/Height 不一致
+}
+```
+
 ## 本機建置與測試
 
 ### 需求
@@ -37,7 +83,7 @@ dotnet build src/Barcode.Generator.sln --configuration Release
 dotnet test src/Barcode.Generator.sln --configuration Release
 ```
 
-### 執行 Web API 範例
+## 執行 Web API 範例
 
 ```bash
 dotnet run --project src/Demo.WebApi
@@ -59,7 +105,7 @@ GET /generate?text=Hello%20Barcode&width=512&height=512
 
 成功回傳：`image/bmp`。
 
-錯誤回應範例：
+### Web API 錯誤回應範例
 
 ```http
 GET /generate?text=
@@ -71,6 +117,20 @@ GET /generate?text=
 {
   "errors": {
     "text": ["text is required and cannot be empty."]
+  }
+}
+```
+
+```http
+GET /generate?text=ok&width=16
+```
+
+會回傳 `400`，例如：
+
+```json
+{
+  "errors": {
+    "width": ["width must be between 64 and 2048."]
   }
 }
 ```
