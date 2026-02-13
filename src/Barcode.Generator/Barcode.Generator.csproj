@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <Description>.NET Standard Library based on ZXing.NET project that produce in memory BMP images of generated barcodes</Description>
     <Copyright>(c) 2019 Nicolò Carandini</Copyright>
     <PackageLicenseUrl>https://github.com/ncarandini/Barcode.Generator/blob/release/LICENSE</PackageLicenseUrl>
