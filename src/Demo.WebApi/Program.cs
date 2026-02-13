@@ -65,3 +65,5 @@ app.MapGet("/generate", (string text, int? width, int? height, ILoggerFactory lo
 });
 
 app.Run();
+
+public partial class Program { }
