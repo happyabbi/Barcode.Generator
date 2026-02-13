@@ -2,6 +2,9 @@ using Barcode.Generator;
 using Barcode.Generator.Common;
 using Barcode.Generator.Rendering;
 using Demo.WebApi;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
