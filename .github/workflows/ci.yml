@@ -9,7 +9,7 @@ on:
   pull_request:
 
 jobs:
-  build-test:
+  backend-build-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,3 +30,27 @@ jobs:
 
       - name: Test
         run: dotnet test src/Barcode.Generator.sln --configuration Release --no-build
+
+  frontend-build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src/Demo.Web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/Demo.Web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
