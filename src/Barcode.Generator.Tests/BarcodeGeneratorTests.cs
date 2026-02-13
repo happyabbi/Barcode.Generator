@@ -1,3 +1,5 @@
+using System;
+using System.Reflection;
 using Barcode.Generator;
 using Barcode.Generator.Rendering;
 using Xunit;
@@ -28,6 +30,26 @@ namespace Barcode.Generator.Tests
 
             var expectedLength = 14 + 40 + pixelData.Width * pixelData.Height * 4;
             Assert.Equal(expectedLength, bmpBytes.Length);
+        }
+
+        [Fact]
+        public void BitmapConverter_FromPixelData_Throws_OnNull()
+        {
+            Assert.Throws<System.ArgumentNullException>(() => BitmapConverter.FromPixelData(null));
+        }
+
+        [Fact]
+        public void BitmapConverter_FromPixelData_Throws_OnInvalidPixelBufferLength()
+        {
+            var ctor = typeof(PixelData).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(int), typeof(int), typeof(byte[]) },
+                modifiers: null);
+
+            var invalidPixelData = (PixelData)ctor.Invoke(new object[] { 2, 2, new byte[8] });
+
+            Assert.Throws<ArgumentException>(() => BitmapConverter.FromPixelData(invalidPixelData));
         }
     }
 }
