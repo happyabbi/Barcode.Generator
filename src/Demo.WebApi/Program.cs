@@ -1,3 +1,4 @@
+using System;
 using Barcode.Generator;
 using Barcode.Generator.Common;
 using Barcode.Generator.Rendering;
