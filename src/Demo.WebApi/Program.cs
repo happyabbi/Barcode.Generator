@@ -5,14 +5,28 @@ using Barcode.Generator.Rendering;
 using Demo.WebApi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
-var app = builder.Build();
 
-app.MapGet("/generate", (string text, int? width, int? height, ILoggerFactory loggerFactory) =>
+builder.Services.AddCors(options =>
 {
-    var validationErrors = GenerateRequestValidation.Validate(text, width, height);
+    options.AddDefaultPolicy(policy =>
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .SetIsOriginAllowed(origin =>
+                origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase)));
+});
+
+var app = builder.Build();
+app.UseCors();
+
+app.MapGet("/generate", (string text, int? width, int? height, string? format, ILoggerFactory loggerFactory) =>
+{
+    var validationErrors = GenerateRequestValidation.Validate(text, width, height, format);
     if (validationErrors.Count > 0)
     {
         return Results.ValidationProblem(validationErrors);
@@ -22,7 +36,7 @@ app.MapGet("/generate", (string text, int? width, int? height, ILoggerFactory lo
 
     var barcodeWriter = new BarcodeWriterPixelData
     {
-        Format = BarcodeFormat.QR_CODE,
+        Format = GenerateRequestValidation.ResolveFormat(format),
         Options = new EncodingOptions
         {
             Width = GenerateRequestValidation.ResolveDimension(width),
