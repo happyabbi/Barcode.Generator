@@ -143,4 +143,20 @@ npm run preview
 ## CI
 
 - GitHub Actions：`.github/workflows/ci.yml`
-- push / pull request 會執行 restore、build、test
+- push / pull request 會同時檢查前後端：
+  - **Backend (.NET)**：`dotnet restore` → `dotnet build` → `dotnet test`
+  - **Frontend (React)**：`npm ci` → `npm run build`（工作目錄：`src/Demo.Web`）
+
+如需在本機模擬 CI：
+
+```bash
+# backend
+dotnet restore src/Barcode.Generator.sln
+dotnet build src/Barcode.Generator.sln --configuration Release
+dotnet test src/Barcode.Generator.sln --configuration Release
+
+# frontend
+cd src/Demo.Web
+npm ci
+npm run build
+```
