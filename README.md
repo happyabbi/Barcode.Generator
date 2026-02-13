@@ -9,6 +9,7 @@
   - 新增 `net8.0` 以獲得現代執行環境與工具鏈支援
 - `src/Demo.Console`：`net8.0`
 - `src/Demo.WebApi`：`net8.0`
+- `src/Demo.Web`：React + TypeScript + Vite
 - `src/Barcode.Generator.Tests`：`net8.0`
 
 ## 專案結構
@@ -16,11 +17,10 @@
 - `src/Barcode.Generator`：核心函式庫
 - `src/Demo.Console`：主控台範例，將 QR Code 寫入檔案
 - `src/Demo.WebApi`：ASP.NET Core Minimal API 範例，提供條碼產生端點
+- `src/Demo.Web`：前端 Web UI（React）
 - `src/Barcode.Generator.Tests`：xUnit 測試專案
 
 ## 快速開始（Library API）
-
-### 1) 產生 QR Code 像素資料
 
 ```csharp
 using Barcode.Generator;
@@ -38,30 +38,8 @@ var writer = new BarcodeWriterPixelData
 };
 
 PixelData pixelData = writer.Write("Hello Barcode");
-```
-
-### 2) 轉成 BMP 位元組並寫檔
-
-```csharp
 byte[] bmpBytes = BitmapConverter.FromPixelData(pixelData);
 File.WriteAllBytes("qrcode.bmp", bmpBytes);
-```
-
-### 3) 常見錯誤處理
-
-```csharp
-try
-{
-    byte[] bmpBytes = BitmapConverter.FromPixelData(pixelData);
-}
-catch (ArgumentNullException ex)
-{
-    // pixelData 為 null
-}
-catch (ArgumentException ex)
-{
-    // 像素緩衝區長度與 Width/Height 不一致
-}
 ```
 
 ## 本機建置與測試
@@ -69,6 +47,7 @@ catch (ArgumentException ex)
 ### 需求
 
 - .NET SDK 8.0（建議使用最新 patch）
+- Node.js 20+（前端）
 
 ### 建置
 
@@ -89,53 +68,79 @@ dotnet test src/Barcode.Generator.sln --configuration Release
 dotnet run --project src/Demo.WebApi
 ```
 
-呼叫範例：
+`/generate` 支援參數：
+
+- `text`：必填，不可為空白，長度上限 `1024`
+- `width`：選填，若提供需介於 `64` ~ `2048`（預設 `300`）
+- `height`：選填，若提供需介於 `64` ~ `2048`（預設 `300`）
+- `format`：選填，預設 `QR_CODE`
+  - 支援：`QR_CODE`, `CODE_128`, `CODE_39`, `EAN_13`, `EAN_8`, `ITF`, `UPC_A`, `PDF_417`, `DATA_MATRIX`
+
+範例：
 
 ```http
 GET /generate?text=Hello%20Barcode
-GET /generate?text=Hello%20Barcode&width=512&height=512
+GET /generate?text=ABC-123&format=CODE_128&width=500&height=200
+GET /generate?text=471234567890&format=EAN_13&width=500&height=220
 ```
 
-參數限制（`/generate`）：
+成功回傳 `image/bmp`。
 
-- `text`：必填，不可為空白，長度上限 `1024` 字元
-- `width`：選填，若提供則需介於 `64` ~ `2048`
-- `height`：選填，若提供則需介於 `64` ~ `2048`
-- 未提供 `width` / `height` 時，預設為 `300 x 300`
-
-成功回傳：`image/bmp`。
-
-### Web API 錯誤回應範例
-
-```http
-GET /generate?text=
-```
-
-會回傳 `400`（validation problem），例如：
+若驗證失敗，回傳 `400`（validation problem），例如：
 
 ```json
 {
   "errors": {
-    "text": ["text is required and cannot be empty."]
+    "format": [
+      "format must be one of: QR_CODE, CODE_128, CODE_39, EAN_13, EAN_8, ITF, UPC_A, PDF_417, DATA_MATRIX."
+    ]
   }
 }
 ```
 
-```http
-GET /generate?text=ok&width=16
+## 執行前端（Demo.Web）
+
+```bash
+cd src/Demo.Web
+cp .env.example .env
+npm install
+npm run dev
 ```
 
-會回傳 `400`，例如：
+預設前端開在 `http://localhost:5173`。
 
-```json
-{
-  "errors": {
-    "width": ["width must be between 64 and 2048."]
-  }
-}
+可透過環境變數設定 API 位址：
+
+```env
+VITE_API_BASE_URL=http://localhost:5000
+```
+
+### 前後端一起啟動（建議）
+
+1. Terminal A 啟動 Web API
+
+```bash
+dotnet run --project src/Demo.WebApi
+```
+
+2. Terminal B 啟動 React 前端
+
+```bash
+cd src/Demo.Web
+npm run dev
+```
+
+3. 打開瀏覽器到 `http://localhost:5173`
+
+### 前端建置
+
+```bash
+cd src/Demo.Web
+npm run build
+npm run preview
 ```
 
 ## CI
 
 - GitHub Actions：`.github/workflows/ci.yml`
-  - 會在 push / pull request 時執行 restore、build、test
+- push / pull request 會執行 restore、build、test
