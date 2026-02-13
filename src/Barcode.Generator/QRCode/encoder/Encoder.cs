@@ -739,11 +739,11 @@ namespace Barcode.Generator.QrCode.Internal
             }
          }
 #endif
-            catch (ArgumentException ex)
+            catch (EncoderFallbackException ex)
             {
                 throw new WriterException(ex.Message, ex);
             }
-            catch (EncoderFallbackException ex)
+            catch (ArgumentException ex)
             {
                 throw new WriterException(ex.Message, ex);
             }
@@ -760,11 +760,11 @@ namespace Barcode.Generator.QrCode.Internal
             {
                 bytes = Encoding.GetEncoding("Shift_JIS").GetBytes(content);
             }
-            catch (ArgumentException ex)
+            catch (EncoderFallbackException ex)
             {
                 throw new WriterException(ex.Message, ex);
             }
-            catch (EncoderFallbackException ex)
+            catch (ArgumentException ex)
             {
                 throw new WriterException(ex.Message, ex);
             }
