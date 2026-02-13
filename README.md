@@ -47,9 +47,33 @@ dotnet run --project src/Demo.WebApi
 
 ```http
 GET /generate?text=Hello%20Barcode
+GET /generate?text=Hello%20Barcode&width=512&height=512
 ```
 
-回傳為 `image/bmp`。
+參數限制（`/generate`）：
+
+- `text`：必填，不可為空白，長度上限 `1024` 字元
+- `width`：選填，若提供則需介於 `64` ~ `2048`
+- `height`：選填，若提供則需介於 `64` ~ `2048`
+- 未提供 `width` / `height` 時，預設為 `300 x 300`
+
+成功回傳：`image/bmp`。
+
+錯誤回應範例：
+
+```http
+GET /generate?text=
+```
+
+會回傳 `400`（validation problem），例如：
+
+```json
+{
+  "errors": {
+    "text": ["text is required and cannot be empty."]
+  }
+}
+```
 
 ## CI
 

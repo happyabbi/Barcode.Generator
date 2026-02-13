@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Barcode.Generator\Barcode.Generator.csproj" />
+    <ProjectReference Include="..\Demo.WebApi\Demo.WebApi.csproj" />
   </ItemGroup>
 
 </Project>
