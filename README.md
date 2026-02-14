@@ -84,7 +84,22 @@ GET /generate?text=ABC-123&format=CODE_128&width=500&height=200
 GET /generate?text=471234567890&format=EAN_13&width=500&height=220
 ```
 
+也支援 `POST /generate`（建議前端使用，避免把 text 放在 URL）：
+
+```http
+POST /generate
+Content-Type: application/json
+
+{
+  "text": "Hello Barcode",
+  "format": "QR_CODE",
+  "width": 300,
+  "height": 300
+}
+```
+
 成功回傳 `image/bmp`。
+若超過速率限制，回傳 `429`。
 
 若驗證失敗，回傳 `400`（validation problem），例如：
 

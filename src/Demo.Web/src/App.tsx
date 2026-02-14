@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useState } from 'react';
 
 type BarcodeFormat =
   | 'QR_CODE'
@@ -34,15 +34,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const queryUrl = useMemo(() => {
-    const url = new URL('/generate', apiBaseUrl);
-    url.searchParams.set('text', text);
-    url.searchParams.set('format', format);
-    url.searchParams.set('width', String(width));
-    url.searchParams.set('height', String(height));
-    return url;
-  }, [text, format, width, height]);
-
   const onGenerate = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -59,7 +50,19 @@ export default function App() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(queryUrl.toString());
+      const response = await fetch(new URL('/generate', apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text,
+          format,
+          width,
+          height
+        })
+      });
+
       if (!response.ok) {
         const body = await response.text();
         setError(body || 'Request failed.');

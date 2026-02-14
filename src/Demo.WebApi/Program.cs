@@ -56,10 +56,27 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    await next();
+});
 app.UseCors();
 app.UseRateLimiter();
 
 app.MapGet("/generate", (string text, int? width, int? height, string? format, ILoggerFactory loggerFactory) =>
+    GenerateBarcode(text, width, height, format, loggerFactory))
+    .RequireRateLimiting("generate");
+
+app.MapPost("/generate", (GenerateRequest request, ILoggerFactory loggerFactory) =>
+    GenerateBarcode(request.Text ?? string.Empty, request.Width, request.Height, request.Format, loggerFactory))
+    .RequireRateLimiting("generate");
+
+app.Run();
+
+static IResult GenerateBarcode(string text, int? width, int? height, string? format, ILoggerFactory loggerFactory)
 {
     var validationErrors = GenerateRequestValidation.Validate(text, width, height, format);
     if (validationErrors.Count > 0)
@@ -111,8 +128,8 @@ app.MapGet("/generate", (string text, int? width, int? height, string? format, I
             detail: "An unexpected server error occurred while generating the barcode.",
             statusCode: StatusCodes.Status500InternalServerError);
     }
-}).RequireRateLimiting("generate");
+}
 
-app.Run();
+public record GenerateRequest(string? Text, int? Width, int? Height, string? Format);
 
 public partial class Program { }
