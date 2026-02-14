@@ -260,6 +260,26 @@ api.MapPost("/products/{id:guid}/barcodes", async (Guid id, AddBarcodeRequest re
     });
 });
 
+api.MapGet("/products/{id:guid}/barcodes", async (Guid id, AppDbContext db) =>
+{
+    var items = await db.Barcodes
+        .AsNoTracking()
+        .Where(b => b.ProductId == id)
+        .OrderByDescending(b => b.IsPrimary)
+        .ThenByDescending(b => b.CreatedAt)
+        .Select(b => new
+        {
+            b.Id,
+            b.ProductId,
+            b.Format,
+            b.CodeValue,
+            b.IsPrimary
+        })
+        .ToListAsync();
+
+    return Results.Ok(new { items });
+});
+
 api.MapGet("/barcodes/{codeValue}", async (string codeValue, AppDbContext db) =>
 {
     var match = await db.Barcodes

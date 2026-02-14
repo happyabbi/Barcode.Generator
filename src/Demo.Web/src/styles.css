@@ -101,6 +101,10 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   border-radius: 10px;
 }
 
+.table-wrap.slim {
+  max-height: 240px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

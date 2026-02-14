@@ -22,6 +22,22 @@ type ProductItem = {
   reorderLevel: number;
 };
 
+type ProductBarcode = {
+  id: string;
+  productId: string;
+  format: string;
+  codeValue: string;
+  isPrimary: boolean;
+};
+
+type LowStockItem = {
+  productId: string;
+  sku: string;
+  name: string;
+  qtyOnHand: number;
+  reorderLevel: number;
+};
+
 const formats: { value: BarcodeFormat; label: string }[] = [
   { value: 'QR_CODE', label: 'QR Code' },
   { value: 'CODE_128', label: 'Code 128' },
@@ -82,10 +98,28 @@ export default function App() {
   const [codeValue, setCodeValue] = useState('');
   const [stockInQty, setStockInQty] = useState(10);
 
+  const [editName, setEditName] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editPrice, setEditPrice] = useState(0);
+  const [editCost, setEditCost] = useState(0);
+  const [editReorder, setEditReorder] = useState(10);
+
+  const [barcodes, setBarcodes] = useState<ProductBarcode[]>([]);
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
+
   const selectedProduct = useMemo(
     () => products.find((p) => p.id === selectedProductId) ?? null,
     [products, selectedProductId]
   );
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+    setEditName(selectedProduct.name);
+    setEditCategory(selectedProduct.category ?? '');
+    setEditPrice(selectedProduct.price);
+    setEditCost(selectedProduct.cost);
+    setEditReorder(selectedProduct.reorderLevel);
+  }, [selectedProduct]);
 
   const loadProducts = async (search?: string) => {
     setIsLoadingProducts(true);
@@ -114,10 +148,41 @@ export default function App() {
     }
   };
 
+  const loadBarcodes = async (productId: string) => {
+    setBarcodes([]);
+    try {
+      const response = await fetch(new URL(`/api/products/${productId}/barcodes`, apiBaseUrl).toString());
+      if (!response.ok) return;
+      const body = await response.json() as { items: ProductBarcode[] };
+      setBarcodes(body.items ?? []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadLowStock = async () => {
+    try {
+      const response = await fetch(new URL('/api/inventory/low-stock', apiBaseUrl).toString());
+      if (!response.ok) return;
+      const body = await response.json() as { items: LowStockItem[] };
+      setLowStockItems(body.items ?? []);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     loadProducts('');
+    loadLowStock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (selectedProductId) {
+      loadBarcodes(selectedProductId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProductId]);
 
   const onGenerate = async (event: FormEvent) => {
     event.preventDefault();
@@ -205,8 +270,46 @@ export default function App() {
       setInitialQty(0);
       setReorderLevel(10);
       await loadProducts('');
+      await loadLowStock();
     } catch {
       setProductsError('Failed to create product.');
+    }
+  };
+
+  const onUpdateProduct = async (event: FormEvent) => {
+    event.preventDefault();
+    setProductsError(null);
+    setProductsInfo(null);
+
+    if (!selectedProductId) {
+      setProductsError('Select a product first.');
+      return;
+    }
+
+    try {
+      const response = await fetch(new URL(`/api/products/${selectedProductId}`, apiBaseUrl).toString(), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName,
+          category: editCategory || null,
+          price: editPrice,
+          cost: editCost,
+          reorderLevel: editReorder
+        })
+      });
+
+      const body = await response.text();
+      if (!response.ok) {
+        setProductsError(parseError(body));
+        return;
+      }
+
+      setProductsInfo('Product updated.');
+      await loadProducts();
+      await loadLowStock();
+    } catch {
+      setProductsError('Failed to update product.');
     }
   };
 
@@ -235,6 +338,7 @@ export default function App() {
       setProductsInfo(`Barcode ${barcodeFormat} added.`);
       setCodeValue('');
       await loadProducts();
+      await loadBarcodes(selectedProductId);
     } catch {
       setProductsError('Failed to add barcode.');
     }
@@ -264,6 +368,7 @@ export default function App() {
 
       setProductsInfo(`Stock in +${stockInQty} completed.`);
       await loadProducts();
+      await loadLowStock();
     } catch {
       setProductsError('Failed to stock in.');
     }
@@ -384,8 +489,22 @@ export default function App() {
             </div>
 
             <div className="section">
-              <h2>Selected Product Actions</h2>
+              <h2>Edit Selected Product</h2>
               <p className="subtitle small">Selected: {selectedProduct ? `${selectedProduct.sku} - ${selectedProduct.name}` : 'None'}</p>
+              <form className="form" onSubmit={onUpdateProduct}>
+                <div className="grid">
+                  <label>Name<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+                  <label>Category<input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} /></label>
+                  <label>Price<input type="number" min={0} step="0.01" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} /></label>
+                  <label>Cost<input type="number" min={0} step="0.01" value={editCost} onChange={(e) => setEditCost(Number(e.target.value))} /></label>
+                  <label>Reorder Level<input type="number" min={0} value={editReorder} onChange={(e) => setEditReorder(Number(e.target.value))} /></label>
+                </div>
+                <button type="submit">Update Product</button>
+              </form>
+            </div>
+
+            <div className="section">
+              <h2>Selected Product Actions</h2>
 
               <form className="form" onSubmit={onAddBarcode}>
                 <div className="grid">
@@ -405,6 +524,24 @@ export default function App() {
                 <button type="submit">Add Primary Barcode</button>
               </form>
 
+              <div className="table-wrap slim">
+                <table>
+                  <thead>
+                    <tr><th>Format</th><th>Code</th><th>Primary</th></tr>
+                  </thead>
+                  <tbody>
+                    {barcodes.map((b) => (
+                      <tr key={b.id}>
+                        <td>{b.format}</td>
+                        <td>{b.codeValue}</td>
+                        <td>{b.isPrimary ? 'Yes' : 'No'}</td>
+                      </tr>
+                    ))}
+                    {!barcodes.length && <tr><td colSpan={3}>No barcodes yet.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+
               <form className="form" onSubmit={onStockIn}>
                 <div className="grid">
                   <label>
@@ -414,6 +551,28 @@ export default function App() {
                 </div>
                 <button type="submit">Stock In</button>
               </form>
+            </div>
+
+            <div className="section">
+              <h2>Low Stock</h2>
+              <div className="table-wrap slim">
+                <table>
+                  <thead>
+                    <tr><th>SKU</th><th>Name</th><th>Qty</th><th>Reorder</th></tr>
+                  </thead>
+                  <tbody>
+                    {lowStockItems.map((i) => (
+                      <tr key={i.productId}>
+                        <td>{i.sku}</td>
+                        <td>{i.name}</td>
+                        <td>{i.qtyOnHand}</td>
+                        <td>{i.reorderLevel}</td>
+                      </tr>
+                    ))}
+                    {!lowStockItems.length && <tr><td colSpan={4}>No low stock items.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {productsError && <div className="error">{productsError}</div>}
