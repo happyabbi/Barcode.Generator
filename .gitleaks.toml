@@ -1,0 +1,11 @@
+title = "Barcode.Generator gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated frontend build artifacts and lockfile may include high-entropy checksums"
+paths = [
+  '''src/Demo.Web/dist/.*''',
+  '''src/Demo.Web/package-lock.json'''
+]
