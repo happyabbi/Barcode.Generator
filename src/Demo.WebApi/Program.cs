@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.RateLimiting;
 using Barcode.Generator;
@@ -39,7 +40,8 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    var conn = builder.Configuration.GetConnectionString("PosLite") ?? "Data Source=poslite.db";
+    var defaultDbPath = Path.Combine(builder.Environment.ContentRootPath, "poslite.db");
+    var conn = builder.Configuration.GetConnectionString("PosLite") ?? $"Data Source={defaultDbPath}";
     options.UseSqlite(conn);
 });
 
@@ -169,7 +171,7 @@ api.MapGet("/products", async (string? keyword, int page, int pageSize, AppDbCon
 
     var total = await query.CountAsync();
     var items = await query
-        .OrderByDescending(p => p.UpdatedAt)
+        .OrderBy(p => p.Sku)
         .Skip((page - 1) * pageSize)
         .Take(pageSize)
         .Select(p => new
@@ -267,7 +269,7 @@ api.MapGet("/products/{id:guid}/barcodes", async (Guid id, AppDbContext db) =>
         .AsNoTracking()
         .Where(b => b.ProductId == id)
         .OrderByDescending(b => b.IsPrimary)
-        .ThenByDescending(b => b.CreatedAt)
+        .ThenBy(b => b.CodeValue)
         .Select(b => new
         {
             b.Id,
