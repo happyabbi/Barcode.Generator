@@ -70,6 +70,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+    SeedDemoData(db);
 }
 
 app.Use(async (context, next) =>
@@ -359,6 +360,63 @@ api.MapGet("/inventory/low-stock", async (AppDbContext db) =>
 });
 
 app.Run();
+
+static void SeedDemoData(AppDbContext db)
+{
+    if (db.Products.Any())
+    {
+        return;
+    }
+
+    var seeds = new[]
+    {
+        new { Sku = "SKU-COFFEE-001", Name = "Arabica Coffee Beans 1kg", Category = "Beverage", Price = 489m, Cost = 320m, Qty = 24, Reorder = 10, Format = "CODE_128", Code = "COFFEE001" },
+        new { Sku = "SKU-TOILET-001", Name = "Toilet Paper 24 Rolls", Category = "Daily", Price = 1159m, Cost = 860m, Qty = 8, Reorder = 12, Format = "EAN_13", Code = "471234567890" },
+        new { Sku = "SKU-SNACK-001", Name = "Mixed Nuts 500g", Category = "Snack", Price = 329m, Cost = 220m, Qty = 18, Reorder = 10, Format = "EAN_13", Code = "471234567891" },
+        new { Sku = "SKU-DRINK-001", Name = "Sparkling Water 24pk", Category = "Beverage", Price = 235m, Cost = 150m, Qty = 6, Reorder = 8, Format = "UPC_A", Code = "123456789012" },
+        new { Sku = "SKU-CLEAN-001", Name = "Laundry Detergent 3L", Category = "Cleaning", Price = 569m, Cost = 410m, Qty = 14, Reorder = 9, Format = "CODE_128", Code = "CLEAN001" }
+    };
+
+    foreach (var item in seeds)
+    {
+        var product = new Product
+        {
+            Sku = item.Sku,
+            Name = item.Name,
+            Category = item.Category,
+            Price = item.Price,
+            Cost = item.Cost,
+            IsActive = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        db.Products.Add(product);
+        db.InventoryLevels.Add(new InventoryLevel
+        {
+            ProductId = product.Id,
+            QtyOnHand = item.Qty,
+            ReorderLevel = item.Reorder
+        });
+
+        db.Barcodes.Add(new BarcodeEntry
+        {
+            ProductId = product.Id,
+            Format = item.Format,
+            CodeValue = item.Code,
+            IsPrimary = true
+        });
+
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            ProductId = product.Id,
+            MovementType = "IN",
+            Qty = item.Qty,
+            Reason = "Seed demo data"
+        });
+    }
+
+    db.SaveChanges();
+}
 
 static IResult GenerateBarcode(string text, int? width, int? height, string? format, ILoggerFactory loggerFactory)
 {
