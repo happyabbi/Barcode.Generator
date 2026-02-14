@@ -163,6 +163,27 @@ th, td {
   text-align: left;
 }
 
+th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  z-index: 1;
+}
+
+.th-btn {
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-weight: 700;
+  padding: 0;
+  border-radius: 0;
+}
+
+.mini-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+}
+
 tbody tr {
   cursor: pointer;
 }

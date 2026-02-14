@@ -38,6 +38,8 @@ type LowStockItem = {
   reorderLevel: number;
 };
 
+type ProductSortKey = 'sku' | 'name' | 'price' | 'qtyOnHand';
+
 type ToastState = { type: 'success' | 'error'; message: string } | null;
 
 const formats: { value: BarcodeFormat; label: string }[] = [
@@ -86,6 +88,8 @@ export default function App() {
   const [keyword, setKeyword] = useState('');
   const [productsError, setProductsError] = useState<string | null>(null);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [sortKey, setSortKey] = useState<ProductSortKey>('sku');
+  const [sortAsc, setSortAsc] = useState(true);
 
   const [toast, setToast] = useState<ToastState>(null);
 
@@ -116,6 +120,23 @@ export default function App() {
     () => products.find((p) => p.id === selectedProductId) ?? null,
     [products, selectedProductId]
   );
+
+  const sortedProducts = useMemo(() => {
+    const cloned = [...products];
+    cloned.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortAsc ? av - bv : bv - av;
+      }
+      const aa = String(av).toLowerCase();
+      const bb = String(bv).toLowerCase();
+      if (aa < bb) return sortAsc ? -1 : 1;
+      if (aa > bb) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    return cloned;
+  }, [products, sortAsc, sortKey]);
 
   useEffect(() => {
     if (!selectedProduct) return;
@@ -197,6 +218,63 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProductId]);
+
+  const toggleSort = (key: ProductSortKey) => {
+    if (sortKey === key) {
+      setSortAsc((v) => !v);
+      return;
+    }
+    setSortKey(key);
+    setSortAsc(true);
+  };
+
+  const getBarcodeValidationHint = (): string | null => {
+    const value = codeValue.trim();
+    if (!value) return null;
+
+    const onlyDigits = /^\d+$/.test(value);
+    if (barcodeFormat === 'EAN_13' && (!onlyDigits || !(value.length === 12 || value.length === 13))) {
+      return 'EAN-13 需為 12 或 13 位數字';
+    }
+    if (barcodeFormat === 'EAN_8' && (!onlyDigits || !(value.length === 7 || value.length === 8))) {
+      return 'EAN-8 需為 7 或 8 位數字';
+    }
+    if (barcodeFormat === 'UPC_A' && (!onlyDigits || !(value.length === 11 || value.length === 12))) {
+      return 'UPC-A 需為 11 或 12 位數字';
+    }
+    if (barcodeFormat === 'ITF' && (!onlyDigits || value.length % 2 !== 0)) {
+      return 'ITF 需為偶數位數字';
+    }
+    return null;
+  };
+
+  const onQuickStockIn = async (item: LowStockItem) => {
+    const qty = Math.max(item.reorderLevel - item.qtyOnHand + 1, 1);
+    try {
+      const response = await fetch(new URL('/api/inventory/in', apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: item.productId, qty, reason: 'Quick stock-in from low stock panel' })
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        const err = parseError(body);
+        setProductsError(err);
+        showError(err);
+        return;
+      }
+
+      setSelectedProductId(item.productId);
+      setStockInQty(qty);
+      showSuccess(`已快速補貨 ${item.sku} +${qty}`);
+      await loadProducts();
+      await loadLowStock();
+    } catch {
+      const err = 'Quick stock-in failed.';
+      setProductsError(err);
+      showError(err);
+    }
+  };
 
   const onGenerate = async (event: FormEvent) => {
     event.preventDefault();
@@ -354,6 +432,13 @@ export default function App() {
       const err = 'Select a product and enter code value.';
       setProductsError(err);
       showError(err);
+      return;
+    }
+
+    const barcodeHint = getBarcodeValidationHint();
+    if (barcodeHint) {
+      setProductsError(barcodeHint);
+      showError(barcodeHint);
       return;
     }
 
@@ -549,11 +634,14 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>SKU</th><th>Name</th><th>Price</th><th>Qty</th>
+                        <th><button className="th-btn" onClick={() => toggleSort('sku')}>SKU {sortKey === 'sku' ? (sortAsc ? '↑' : '↓') : ''}</button></th>
+                        <th><button className="th-btn" onClick={() => toggleSort('name')}>Name {sortKey === 'name' ? (sortAsc ? '↑' : '↓') : ''}</button></th>
+                        <th><button className="th-btn" onClick={() => toggleSort('price')}>Price {sortKey === 'price' ? (sortAsc ? '↑' : '↓') : ''}</button></th>
+                        <th><button className="th-btn" onClick={() => toggleSort('qtyOnHand')}>Qty {sortKey === 'qtyOnHand' ? (sortAsc ? '↑' : '↓') : ''}</button></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {products.map((p) => (
+                      {sortedProducts.map((p) => (
                         <tr key={p.id} className={selectedProductId === p.id ? 'selected' : ''} onClick={() => setSelectedProductId(p.id)}>
                           <td>{p.sku}</td>
                           <td>{p.name}</td>
@@ -597,9 +685,10 @@ export default function App() {
                     <label>
                       Code Value
                       <input value={codeValue} onChange={(e) => setCodeValue(e.target.value)} placeholder="e.g. 471234567890" />
+                      {getBarcodeValidationHint() && <span className="field-error">{getBarcodeValidationHint()}</span>}
                     </label>
                   </div>
-                  <button type="submit" disabled={!selectedProductId}>Add Barcode</button>
+                  <button type="submit" disabled={!selectedProductId || !!getBarcodeValidationHint()}>Add Barcode</button>
                 </form>
 
                 <div className="table-wrap slim">
@@ -638,7 +727,7 @@ export default function App() {
               <div className="table-wrap slim">
                 <table>
                   <thead>
-                    <tr><th>SKU</th><th>Name</th><th>Qty</th><th>Reorder</th></tr>
+                    <tr><th>SKU</th><th>Name</th><th>Qty</th><th>Reorder</th><th>Action</th></tr>
                   </thead>
                   <tbody>
                     {lowStockItems.map((i) => (
@@ -647,9 +736,10 @@ export default function App() {
                         <td>{i.name}</td>
                         <td>{i.qtyOnHand}</td>
                         <td>{i.reorderLevel}</td>
+                        <td><button className="mini-btn" onClick={() => onQuickStockIn(i)}>Quick +</button></td>
                       </tr>
                     ))}
-                    {!lowStockItems.length && <tr><td colSpan={4}>No low stock items.</td></tr>}
+                    {!lowStockItems.length && <tr><td colSpan={5}>No low stock items.</td></tr>}
                   </tbody>
                 </table>
               </div>
