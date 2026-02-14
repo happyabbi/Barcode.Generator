@@ -5,10 +5,19 @@ using Barcode.Generator.Rendering;
 using Demo.WebApi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Linq;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var configuredOrigins = (builder.Configuration["ALLOWED_ORIGINS"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 builder.Services.AddCors(options =>
 {
@@ -17,12 +26,38 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader()
             .AllowAnyMethod()
             .SetIsOriginAllowed(origin =>
-                origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
-                origin.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase)));
+            {
+                var normalized = origin.Trim().TrimEnd('/');
+                return normalized.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                       normalized.StartsWith("http://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
+                       configuredOrigins.Contains(normalized);
+            }));
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "Too many requests. Please try again shortly."
+        }, cancellationToken);
+    };
+
+    options.AddFixedWindowLimiter("generate", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 60;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueLimit = 0;
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+    });
 });
 
 var app = builder.Build();
 app.UseCors();
+app.UseRateLimiter();
 
 app.MapGet("/generate", (string text, int? width, int? height, string? format, ILoggerFactory loggerFactory) =>
 {
@@ -76,7 +111,7 @@ app.MapGet("/generate", (string text, int? width, int? height, string? format, I
             detail: "An unexpected server error occurred while generating the barcode.",
             statusCode: StatusCodes.Status500InternalServerError);
     }
-});
+}).RequireRateLimiting("generate");
 
 app.Run();
 
