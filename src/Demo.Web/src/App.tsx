@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type BarcodeFormat =
   | 'QR_CODE'
@@ -10,6 +10,17 @@ type BarcodeFormat =
   | 'UPC_A'
   | 'PDF_417'
   | 'DATA_MATRIX';
+
+type ProductItem = {
+  id: string;
+  sku: string;
+  name: string;
+  category?: string;
+  price: number;
+  cost: number;
+  qtyOnHand: number;
+  reorderLevel: number;
+};
 
 const formats: { value: BarcodeFormat; label: string }[] = [
   { value: 'QR_CODE', label: 'QR Code' },
@@ -25,67 +36,118 @@ const formats: { value: BarcodeFormat; label: string }[] = [
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000';
 
+function parseError(body: string): string {
+  let message = body || 'Request failed.';
+  try {
+    const parsed = JSON.parse(body) as { error?: string; errors?: Record<string, string[]> };
+    if (parsed.error) {
+      message = parsed.error;
+    } else if (parsed.errors) {
+      const first = Object.values(parsed.errors).flat()[0];
+      if (first) message = first;
+    }
+  } catch {
+    // keep raw body
+  }
+  return message;
+}
+
 export default function App() {
+  const [tab, setTab] = useState<'barcode' | 'products'>('barcode');
+
   const [text, setText] = useState('Hello Barcode');
   const [format, setFormat] = useState<BarcodeFormat>('QR_CODE');
   const [width, setWidth] = useState(300);
   const [height, setHeight] = useState(300);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [barcodeError, setBarcodeError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [keyword, setKeyword] = useState('');
+  const [productsError, setProductsError] = useState<string | null>(null);
+  const [productsInfo, setProductsInfo] = useState<string | null>(null);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  const [sku, setSku] = useState('');
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [price, setPrice] = useState(99);
+  const [cost, setCost] = useState(50);
+  const [initialQty, setInitialQty] = useState(0);
+  const [reorderLevel, setReorderLevel] = useState(10);
+
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [barcodeFormat, setBarcodeFormat] = useState<BarcodeFormat>('CODE_128');
+  const [codeValue, setCodeValue] = useState('');
+  const [stockInQty, setStockInQty] = useState(10);
+
+  const selectedProduct = useMemo(
+    () => products.find((p) => p.id === selectedProductId) ?? null,
+    [products, selectedProductId]
+  );
+
+  const loadProducts = async (search?: string) => {
+    setIsLoadingProducts(true);
+    setProductsError(null);
+    try {
+      const query = new URLSearchParams({ page: '1', pageSize: '100' });
+      const q = search ?? keyword;
+      if (q.trim()) query.set('keyword', q.trim());
+
+      const response = await fetch(new URL(`/api/products?${query.toString()}`, apiBaseUrl).toString());
+      const body = await response.text();
+      if (!response.ok) {
+        setProductsError(parseError(body));
+        return;
+      }
+
+      const parsed = JSON.parse(body) as { items: ProductItem[] };
+      setProducts(parsed.items ?? []);
+      if (!selectedProductId && parsed.items?.length) {
+        setSelectedProductId(parsed.items[0].id);
+      }
+    } catch {
+      setProductsError('Unable to load products.');
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProducts('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onGenerate = async (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
+    setBarcodeError(null);
 
     if (!text.trim()) {
-      setError('Please enter text for barcode generation.');
+      setBarcodeError('Please enter text for barcode generation.');
       return;
     }
 
     if (width < 64 || width > 2048 || height < 64 || height > 2048) {
-      setError('Width and height must be between 64 and 2048.');
+      setBarcodeError('Width and height must be between 64 and 2048.');
       return;
     }
 
-    setIsLoading(true);
+    setIsGenerating(true);
     try {
       const response = await fetch(new URL('/generate', apiBaseUrl).toString(), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          text,
-          format,
-          width,
-          height
-        })
+        body: JSON.stringify({ text, format, width, height })
       });
 
       if (!response.ok) {
         const body = await response.text();
-        let message = body || 'Request failed.';
-
-        try {
-          const parsed = JSON.parse(body) as { error?: string; errors?: Record<string, string[]> };
-          if (parsed.error) {
-            message = parsed.error;
-          } else if (parsed.errors) {
-            const first = Object.values(parsed.errors).flat()[0];
-            if (first) {
-              message = first;
-            }
-          }
-        } catch {
-          // keep raw response text
-        }
-
-        setError(message);
+        setBarcodeError(parseError(body));
         setPreviewUrl((current) => {
-          if (current) {
-            URL.revokeObjectURL(current);
-          }
+          if (current) URL.revokeObjectURL(current);
           return null;
         });
         return;
@@ -94,73 +156,270 @@ export default function App() {
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       setPreviewUrl((current) => {
-        if (current) {
-          URL.revokeObjectURL(current);
-        }
+        if (current) URL.revokeObjectURL(current);
         return objectUrl;
       });
     } catch {
-      setError('Unable to connect to API. Check WebApi URL and availability.');
+      setBarcodeError('Unable to connect to API. Check WebApi URL and availability.');
     } finally {
-      setIsLoading(false);
+      setIsGenerating(false);
+    }
+  };
+
+  const onCreateProduct = async (event: FormEvent) => {
+    event.preventDefault();
+    setProductsError(null);
+    setProductsInfo(null);
+
+    if (!sku.trim() || !name.trim()) {
+      setProductsError('SKU and Name are required.');
+      return;
+    }
+
+    try {
+      const response = await fetch(new URL('/api/products', apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sku,
+          name,
+          category: category || null,
+          price,
+          cost,
+          initialQty,
+          reorderLevel
+        })
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        setProductsError(parseError(body));
+        return;
+      }
+
+      setProductsInfo(`Product ${sku} created.`);
+      setSku('');
+      setName('');
+      setCategory('');
+      setPrice(99);
+      setCost(50);
+      setInitialQty(0);
+      setReorderLevel(10);
+      await loadProducts('');
+    } catch {
+      setProductsError('Failed to create product.');
+    }
+  };
+
+  const onAddBarcode = async (event: FormEvent) => {
+    event.preventDefault();
+    setProductsError(null);
+    setProductsInfo(null);
+
+    if (!selectedProductId || !codeValue.trim()) {
+      setProductsError('Select a product and enter code value.');
+      return;
+    }
+
+    try {
+      const response = await fetch(new URL(`/api/products/${selectedProductId}/barcodes`, apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format: barcodeFormat, codeValue, isPrimary: true })
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        setProductsError(parseError(body));
+        return;
+      }
+
+      setProductsInfo(`Barcode ${barcodeFormat} added.`);
+      setCodeValue('');
+      await loadProducts();
+    } catch {
+      setProductsError('Failed to add barcode.');
+    }
+  };
+
+  const onStockIn = async (event: FormEvent) => {
+    event.preventDefault();
+    setProductsError(null);
+    setProductsInfo(null);
+
+    if (!selectedProductId || stockInQty <= 0) {
+      setProductsError('Select a product and enter qty > 0.');
+      return;
+    }
+
+    try {
+      const response = await fetch(new URL('/api/inventory/in', apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: selectedProductId, qty: stockInQty, reason: 'Manual stock in' })
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        setProductsError(parseError(body));
+        return;
+      }
+
+      setProductsInfo(`Stock in +${stockInQty} completed.`);
+      await loadProducts();
+    } catch {
+      setProductsError('Failed to stock in.');
     }
   };
 
   return (
     <div className="page">
       <div className="card">
-        <h1>Barcode Generator</h1>
-        <p className="subtitle">Generate professional barcode images from the Demo.WebApi endpoint.</p>
+        <h1>Barcode Generator + Product Manager</h1>
+        <p className="subtitle">Sprint 1: barcode generation, products, barcodes and inventory-in.</p>
 
-        <form className="form" onSubmit={onGenerate}>
-          <label>
-            Text
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Enter content..." />
-          </label>
-
-          <div className="grid">
-            <label>
-              Format
-              <select value={format} onChange={(e) => setFormat(e.target.value as BarcodeFormat)}>
-                {formats.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Width
-              <input type="number" min={64} max={2048} value={width} onChange={(e) => setWidth(Number(e.target.value))} />
-            </label>
-
-            <label>
-              Height
-              <input type="number" min={64} max={2048} value={height} onChange={(e) => setHeight(Number(e.target.value))} />
-            </label>
-          </div>
-
-          <button type="submit" disabled={isLoading}>{isLoading ? 'Generating...' : 'Generate barcode'}</button>
-        </form>
-
-        {error && <div className="error">{error}</div>}
-
-        <div className="preview">
-          {previewUrl ? <img src={previewUrl} alt="Generated barcode" /> : <div className="placeholder">Preview will appear here</div>}
+        <div className="tabs">
+          <button className={tab === 'barcode' ? 'tab active' : 'tab'} onClick={() => setTab('barcode')}>Barcode</button>
+          <button className={tab === 'products' ? 'tab active' : 'tab'} onClick={() => setTab('products')}>Products</button>
         </div>
 
-        <div className="actions">
-          <a
-            href={previewUrl ?? '#'}
-            download={`barcode-${format.toLowerCase()}.bmp`}
-            className={`download ${previewUrl ? '' : 'disabled'}`}
-            onClick={(e) => !previewUrl && e.preventDefault()}
-          >
-            Download BMP
-          </a>
-          <span className="api">API: {apiBaseUrl}</span>
-        </div>
+        {tab === 'barcode' && (
+          <>
+            <form className="form" onSubmit={onGenerate}>
+              <label>
+                Text
+                <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Enter content..." />
+              </label>
+
+              <div className="grid">
+                <label>
+                  Format
+                  <select value={format} onChange={(e) => setFormat(e.target.value as BarcodeFormat)}>
+                    {formats.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Width
+                  <input type="number" min={64} max={2048} value={width} onChange={(e) => setWidth(Number(e.target.value))} />
+                </label>
+
+                <label>
+                  Height
+                  <input type="number" min={64} max={2048} value={height} onChange={(e) => setHeight(Number(e.target.value))} />
+                </label>
+              </div>
+
+              <button type="submit" disabled={isGenerating}>{isGenerating ? 'Generating...' : 'Generate barcode'}</button>
+            </form>
+
+            {barcodeError && <div className="error">{barcodeError}</div>}
+
+            <div className="preview">
+              {previewUrl ? <img src={previewUrl} alt="Generated barcode" /> : <div className="placeholder">Preview will appear here</div>}
+            </div>
+
+            <div className="actions">
+              <a
+                href={previewUrl ?? '#'}
+                download={`barcode-${format.toLowerCase()}.bmp`}
+                className={`download ${previewUrl ? '' : 'disabled'}`}
+                onClick={(e) => !previewUrl && e.preventDefault()}
+              >
+                Download BMP
+              </a>
+              <span className="api">API: {apiBaseUrl}</span>
+            </div>
+          </>
+        )}
+
+        {tab === 'products' && (
+          <>
+            <div className="section">
+              <h2>Create Product</h2>
+              <form className="form" onSubmit={onCreateProduct}>
+                <div className="grid">
+                  <label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} /></label>
+                  <label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+                  <label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label>
+                  <label>Price<input type="number" min={0} step="0.01" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></label>
+                  <label>Cost<input type="number" min={0} step="0.01" value={cost} onChange={(e) => setCost(Number(e.target.value))} /></label>
+                  <label>Initial Qty<input type="number" min={0} value={initialQty} onChange={(e) => setInitialQty(Number(e.target.value))} /></label>
+                  <label>Reorder Level<input type="number" min={0} value={reorderLevel} onChange={(e) => setReorderLevel(Number(e.target.value))} /></label>
+                </div>
+                <button type="submit">Create Product</button>
+              </form>
+            </div>
+
+            <div className="section">
+              <h2>Search & List</h2>
+              <div className="row">
+                <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Search by SKU or name" />
+                <button onClick={() => loadProducts()}>Search</button>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>SKU</th><th>Name</th><th>Category</th><th>Price</th><th>Qty</th><th>Reorder</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((p) => (
+                      <tr key={p.id} className={selectedProductId === p.id ? 'selected' : ''} onClick={() => setSelectedProductId(p.id)}>
+                        <td>{p.sku}</td>
+                        <td>{p.name}</td>
+                        <td>{p.category ?? '-'}</td>
+                        <td>{p.price}</td>
+                        <td>{p.qtyOnHand}</td>
+                        <td>{p.reorderLevel}</td>
+                      </tr>
+                    ))}
+                    {!products.length && !isLoadingProducts && (
+                      <tr><td colSpan={6}>No products yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="section">
+              <h2>Selected Product Actions</h2>
+              <p className="subtitle small">Selected: {selectedProduct ? `${selectedProduct.sku} - ${selectedProduct.name}` : 'None'}</p>
+
+              <form className="form" onSubmit={onAddBarcode}>
+                <div className="grid">
+                  <label>
+                    Format
+                    <select value={barcodeFormat} onChange={(e) => setBarcodeFormat(e.target.value as BarcodeFormat)}>
+                      {formats.map((item) => (
+                        <option key={item.value} value={item.value}>{item.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Code Value
+                    <input value={codeValue} onChange={(e) => setCodeValue(e.target.value)} placeholder="e.g. 471234567890" />
+                  </label>
+                </div>
+                <button type="submit">Add Primary Barcode</button>
+              </form>
+
+              <form className="form" onSubmit={onStockIn}>
+                <div className="grid">
+                  <label>
+                    Stock In Qty
+                    <input type="number" min={1} value={stockInQty} onChange={(e) => setStockInQty(Number(e.target.value))} />
+                  </label>
+                </div>
+                <button type="submit">Stock In</button>
+              </form>
+            </div>
+
+            {productsError && <div className="error">{productsError}</div>}
+            {productsInfo && <div className="info">{productsInfo}</div>}
+          </>
+        )}
       </div>
     </div>
   );
