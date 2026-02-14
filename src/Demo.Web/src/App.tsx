@@ -38,6 +38,8 @@ type LowStockItem = {
   reorderLevel: number;
 };
 
+type ToastState = { type: 'success' | 'error'; message: string } | null;
+
 const formats: { value: BarcodeFormat; label: string }[] = [
   { value: 'QR_CODE', label: 'QR Code' },
   { value: 'CODE_128', label: 'Code 128' },
@@ -70,6 +72,7 @@ function parseError(body: string): string {
 
 export default function App() {
   const [tab, setTab] = useState<'barcode' | 'products'>('barcode');
+  const [showCreateProduct, setShowCreateProduct] = useState(false);
 
   const [text, setText] = useState('Hello Barcode');
   const [format, setFormat] = useState<BarcodeFormat>('QR_CODE');
@@ -82,8 +85,9 @@ export default function App() {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [keyword, setKeyword] = useState('');
   const [productsError, setProductsError] = useState<string | null>(null);
-  const [productsInfo, setProductsInfo] = useState<string | null>(null);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  const [toast, setToast] = useState<ToastState>(null);
 
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
@@ -92,6 +96,7 @@ export default function App() {
   const [cost, setCost] = useState(50);
   const [initialQty, setInitialQty] = useState(0);
   const [reorderLevel, setReorderLevel] = useState(10);
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [barcodeFormat, setBarcodeFormat] = useState<BarcodeFormat>('CODE_128');
@@ -120,6 +125,15 @@ export default function App() {
     setEditCost(selectedProduct.cost);
     setEditReorder(selectedProduct.reorderLevel);
   }, [selectedProduct]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const showSuccess = (message: string) => setToast({ type: 'success', message });
+  const showError = (message: string) => setToast({ type: 'error', message });
 
   const loadProducts = async (search?: string) => {
     setIsLoadingProducts(true);
@@ -224,6 +238,7 @@ export default function App() {
         if (current) URL.revokeObjectURL(current);
         return objectUrl;
       });
+      showSuccess('Barcode generated.');
     } catch {
       setBarcodeError('Unable to connect to API. Check WebApi URL and availability.');
     } finally {
@@ -234,10 +249,18 @@ export default function App() {
   const onCreateProduct = async (event: FormEvent) => {
     event.preventDefault();
     setProductsError(null);
-    setProductsInfo(null);
+    setCreateErrors({});
 
-    if (!sku.trim() || !name.trim()) {
-      setProductsError('SKU and Name are required.');
+    const nextErrors: Record<string, string> = {};
+    if (!sku.trim()) nextErrors.sku = 'SKU is required';
+    if (!name.trim()) nextErrors.name = 'Name is required';
+    if (price < 0) nextErrors.price = 'Price must be >= 0';
+    if (cost < 0) nextErrors.cost = 'Cost must be >= 0';
+    if (initialQty < 0) nextErrors.initialQty = 'Initial Qty must be >= 0';
+    if (reorderLevel < 0) nextErrors.reorderLevel = 'Reorder Level must be >= 0';
+
+    if (Object.keys(nextErrors).length) {
+      setCreateErrors(nextErrors);
       return;
     }
 
@@ -257,11 +280,13 @@ export default function App() {
       });
       const body = await response.text();
       if (!response.ok) {
-        setProductsError(parseError(body));
+        const err = parseError(body);
+        setProductsError(err);
+        showError(err);
         return;
       }
 
-      setProductsInfo(`Product ${sku} created.`);
+      showSuccess(`Product ${sku} created.`);
       setSku('');
       setName('');
       setCategory('');
@@ -269,20 +294,24 @@ export default function App() {
       setCost(50);
       setInitialQty(0);
       setReorderLevel(10);
+      setShowCreateProduct(false);
       await loadProducts('');
       await loadLowStock();
     } catch {
-      setProductsError('Failed to create product.');
+      const err = 'Failed to create product.';
+      setProductsError(err);
+      showError(err);
     }
   };
 
   const onUpdateProduct = async (event: FormEvent) => {
     event.preventDefault();
     setProductsError(null);
-    setProductsInfo(null);
 
     if (!selectedProductId) {
-      setProductsError('Select a product first.');
+      const err = 'Select a product first.';
+      setProductsError(err);
+      showError(err);
       return;
     }
 
@@ -301,25 +330,30 @@ export default function App() {
 
       const body = await response.text();
       if (!response.ok) {
-        setProductsError(parseError(body));
+        const err = parseError(body);
+        setProductsError(err);
+        showError(err);
         return;
       }
 
-      setProductsInfo('Product updated.');
+      showSuccess('Product updated.');
       await loadProducts();
       await loadLowStock();
     } catch {
-      setProductsError('Failed to update product.');
+      const err = 'Failed to update product.';
+      setProductsError(err);
+      showError(err);
     }
   };
 
   const onAddBarcode = async (event: FormEvent) => {
     event.preventDefault();
     setProductsError(null);
-    setProductsInfo(null);
 
     if (!selectedProductId || !codeValue.trim()) {
-      setProductsError('Select a product and enter code value.');
+      const err = 'Select a product and enter code value.';
+      setProductsError(err);
+      showError(err);
       return;
     }
 
@@ -331,26 +365,31 @@ export default function App() {
       });
       const body = await response.text();
       if (!response.ok) {
-        setProductsError(parseError(body));
+        const err = parseError(body);
+        setProductsError(err);
+        showError(err);
         return;
       }
 
-      setProductsInfo(`Barcode ${barcodeFormat} added.`);
+      showSuccess(`Barcode ${barcodeFormat} added.`);
       setCodeValue('');
       await loadProducts();
       await loadBarcodes(selectedProductId);
     } catch {
-      setProductsError('Failed to add barcode.');
+      const err = 'Failed to add barcode.';
+      setProductsError(err);
+      showError(err);
     }
   };
 
   const onStockIn = async (event: FormEvent) => {
     event.preventDefault();
     setProductsError(null);
-    setProductsInfo(null);
 
     if (!selectedProductId || stockInQty <= 0) {
-      setProductsError('Select a product and enter qty > 0.');
+      const err = 'Select a product and enter qty > 0.';
+      setProductsError(err);
+      showError(err);
       return;
     }
 
@@ -362,15 +401,19 @@ export default function App() {
       });
       const body = await response.text();
       if (!response.ok) {
-        setProductsError(parseError(body));
+        const err = parseError(body);
+        setProductsError(err);
+        showError(err);
         return;
       }
 
-      setProductsInfo(`Stock in +${stockInQty} completed.`);
+      showSuccess(`Stock in +${stockInQty} completed.`);
       await loadProducts();
       await loadLowStock();
     } catch {
-      setProductsError('Failed to stock in.');
+      const err = 'Failed to stock in.';
+      setProductsError(err);
+      showError(err);
     }
   };
 
@@ -378,18 +421,24 @@ export default function App() {
     <div className="page">
       <div className="card">
         <h1>Barcode Generator + Product Manager</h1>
-        <p className="subtitle">Sprint 1: barcode generation, products, barcodes and inventory-in.</p>
+        <p className="subtitle">Sprint 1.5 UX: flow-based product management layout.</p>
 
         <div className="tabs">
           <button className={tab === 'barcode' ? 'tab active' : 'tab'} onClick={() => setTab('barcode')}>Barcode</button>
           <button className={tab === 'products' ? 'tab active' : 'tab'} onClick={() => setTab('products')}>Products</button>
         </div>
 
+        {toast && (
+          <div className={`toast ${toast.type === 'success' ? 'toast-success' : 'toast-error'}`}>
+            {toast.message}
+          </div>
+        )}
+
         {tab === 'barcode' && (
           <>
             <form className="form" onSubmit={onGenerate}>
               <label>
-                Text
+                Text <span className="req">*</span>
                 <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Enter content..." />
               </label>
 
@@ -439,118 +488,149 @@ export default function App() {
 
         {tab === 'products' && (
           <>
-            <div className="section">
-              <h2>Create Product</h2>
-              <form className="form" onSubmit={onCreateProduct}>
-                <div className="grid">
-                  <label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} /></label>
-                  <label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
-                  <label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label>
-                  <label>Price<input type="number" min={0} step="0.01" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></label>
-                  <label>Cost<input type="number" min={0} step="0.01" value={cost} onChange={(e) => setCost(Number(e.target.value))} /></label>
-                  <label>Initial Qty<input type="number" min={0} value={initialQty} onChange={(e) => setInitialQty(Number(e.target.value))} /></label>
-                  <label>Reorder Level<input type="number" min={0} value={reorderLevel} onChange={(e) => setReorderLevel(Number(e.target.value))} /></label>
-                </div>
-                <button type="submit">Create Product</button>
-              </form>
+            <div className="section header-row">
+              <h2>Products</h2>
+              <button onClick={() => setShowCreateProduct((v) => !v)}>{showCreateProduct ? 'Close Create Form' : 'Create Product'}</button>
             </div>
 
-            <div className="section">
-              <h2>Search & List</h2>
-              <div className="row">
-                <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Search by SKU or name" />
-                <button onClick={() => loadProducts()}>Search</button>
+            {showCreateProduct && (
+              <div className="section">
+                <h3>Create Product</h3>
+                <form className="form" onSubmit={onCreateProduct}>
+                  <div className="grid create-grid">
+                    <label>SKU <span className="req">*</span>
+                      <input value={sku} onChange={(e) => setSku(e.target.value)} />
+                      {createErrors.sku && <span className="field-error">{createErrors.sku}</span>}
+                    </label>
+                    <label>Name <span className="req">*</span>
+                      <input value={name} onChange={(e) => setName(e.target.value)} />
+                      {createErrors.name && <span className="field-error">{createErrors.name}</span>}
+                    </label>
+                    <label>Category
+                      <input value={category} onChange={(e) => setCategory(e.target.value)} />
+                    </label>
+                    <label>Price
+                      <input className="num" type="number" min={0} step="0.01" value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+                      {createErrors.price && <span className="field-error">{createErrors.price}</span>}
+                    </label>
+                    <label>Cost
+                      <input className="num" type="number" min={0} step="0.01" value={cost} onChange={(e) => setCost(Number(e.target.value))} />
+                      {createErrors.cost && <span className="field-error">{createErrors.cost}</span>}
+                    </label>
+                    <label>Initial Qty
+                      <input className="num" type="number" min={0} value={initialQty} onChange={(e) => setInitialQty(Number(e.target.value))} />
+                      {createErrors.initialQty && <span className="field-error">{createErrors.initialQty}</span>}
+                    </label>
+                    <label>Reorder Level
+                      <input className="num" type="number" min={0} value={reorderLevel} onChange={(e) => setReorderLevel(Number(e.target.value))} />
+                      {createErrors.reorderLevel && <span className="field-error">{createErrors.reorderLevel}</span>}
+                    </label>
+                  </div>
+                  <button type="submit">Create Product</button>
+                </form>
               </div>
+            )}
 
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>SKU</th><th>Name</th><th>Category</th><th>Price</th><th>Qty</th><th>Reorder</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {products.map((p) => (
-                      <tr key={p.id} className={selectedProductId === p.id ? 'selected' : ''} onClick={() => setSelectedProductId(p.id)}>
-                        <td>{p.sku}</td>
-                        <td>{p.name}</td>
-                        <td>{p.category ?? '-'}</td>
-                        <td>{p.price}</td>
-                        <td>{p.qtyOnHand}</td>
-                        <td>{p.reorderLevel}</td>
+            {!products.length && !isLoadingProducts && !showCreateProduct && (
+              <div className="empty-state">
+                <p>尚未有商品，先建立第一筆商品。</p>
+                <button onClick={() => setShowCreateProduct(true)}>Create First Product</button>
+              </div>
+            )}
+
+            <div className="products-layout">
+              <div className="left-panel">
+                <div className="row">
+                  <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Search by SKU or name" />
+                  <button onClick={() => loadProducts()}>Search</button>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>SKU</th><th>Name</th><th>Price</th><th>Qty</th>
                       </tr>
-                    ))}
-                    {!products.length && !isLoadingProducts && (
-                      <tr><td colSpan={6}>No products yet.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="section">
-              <h2>Edit Selected Product</h2>
-              <p className="subtitle small">Selected: {selectedProduct ? `${selectedProduct.sku} - ${selectedProduct.name}` : 'None'}</p>
-              <form className="form" onSubmit={onUpdateProduct}>
-                <div className="grid">
-                  <label>Name<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
-                  <label>Category<input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} /></label>
-                  <label>Price<input type="number" min={0} step="0.01" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} /></label>
-                  <label>Cost<input type="number" min={0} step="0.01" value={editCost} onChange={(e) => setEditCost(Number(e.target.value))} /></label>
-                  <label>Reorder Level<input type="number" min={0} value={editReorder} onChange={(e) => setEditReorder(Number(e.target.value))} /></label>
-                </div>
-                <button type="submit">Update Product</button>
-              </form>
-            </div>
-
-            <div className="section">
-              <h2>Selected Product Actions</h2>
-
-              <form className="form" onSubmit={onAddBarcode}>
-                <div className="grid">
-                  <label>
-                    Format
-                    <select value={barcodeFormat} onChange={(e) => setBarcodeFormat(e.target.value as BarcodeFormat)}>
-                      {formats.map((item) => (
-                        <option key={item.value} value={item.value}>{item.label}</option>
+                    </thead>
+                    <tbody>
+                      {products.map((p) => (
+                        <tr key={p.id} className={selectedProductId === p.id ? 'selected' : ''} onClick={() => setSelectedProductId(p.id)}>
+                          <td>{p.sku}</td>
+                          <td>{p.name}</td>
+                          <td>{p.price}</td>
+                          <td>{p.qtyOnHand}</td>
+                        </tr>
                       ))}
-                    </select>
-                  </label>
-                  <label>
-                    Code Value
-                    <input value={codeValue} onChange={(e) => setCodeValue(e.target.value)} placeholder="e.g. 471234567890" />
-                  </label>
+                      {!products.length && !isLoadingProducts && (
+                        <tr><td colSpan={4}>No products yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-                <button type="submit">Add Primary Barcode</button>
-              </form>
-
-              <div className="table-wrap slim">
-                <table>
-                  <thead>
-                    <tr><th>Format</th><th>Code</th><th>Primary</th></tr>
-                  </thead>
-                  <tbody>
-                    {barcodes.map((b) => (
-                      <tr key={b.id}>
-                        <td>{b.format}</td>
-                        <td>{b.codeValue}</td>
-                        <td>{b.isPrimary ? 'Yes' : 'No'}</td>
-                      </tr>
-                    ))}
-                    {!barcodes.length && <tr><td colSpan={3}>No barcodes yet.</td></tr>}
-                  </tbody>
-                </table>
               </div>
 
-              <form className="form" onSubmit={onStockIn}>
-                <div className="grid">
-                  <label>
-                    Stock In Qty
-                    <input type="number" min={1} value={stockInQty} onChange={(e) => setStockInQty(Number(e.target.value))} />
-                  </label>
+              <div className="right-panel">
+                <h3>Edit Selected Product</h3>
+                <p className="subtitle small">{selectedProduct ? `${selectedProduct.sku} - ${selectedProduct.name}` : 'Select one from list'}</p>
+                <form className="form" onSubmit={onUpdateProduct}>
+                  <div className="grid detail-grid">
+                    <label>Name<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+                    <label>Category<input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} /></label>
+                    <label>Price<input className="num" type="number" min={0} step="0.01" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} /></label>
+                    <label>Cost<input className="num" type="number" min={0} step="0.01" value={editCost} onChange={(e) => setEditCost(Number(e.target.value))} /></label>
+                    <label>Reorder<input className="num" type="number" min={0} value={editReorder} onChange={(e) => setEditReorder(Number(e.target.value))} /></label>
+                  </div>
+                  <button type="submit" disabled={!selectedProductId}>Update Product</button>
+                </form>
+
+                <h3>Add Primary Barcode</h3>
+                <form className="form" onSubmit={onAddBarcode}>
+                  <div className="grid detail-grid">
+                    <label>
+                      Format
+                      <select value={barcodeFormat} onChange={(e) => setBarcodeFormat(e.target.value as BarcodeFormat)}>
+                        {formats.map((item) => (
+                          <option key={item.value} value={item.value}>{item.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Code Value
+                      <input value={codeValue} onChange={(e) => setCodeValue(e.target.value)} placeholder="e.g. 471234567890" />
+                    </label>
+                  </div>
+                  <button type="submit" disabled={!selectedProductId}>Add Barcode</button>
+                </form>
+
+                <div className="table-wrap slim">
+                  <table>
+                    <thead>
+                      <tr><th>Format</th><th>Code</th><th>Primary</th></tr>
+                    </thead>
+                    <tbody>
+                      {barcodes.map((b) => (
+                        <tr key={b.id}>
+                          <td>{b.format}</td>
+                          <td>{b.codeValue}</td>
+                          <td>{b.isPrimary ? 'Yes' : 'No'}</td>
+                        </tr>
+                      ))}
+                      {!barcodes.length && <tr><td colSpan={3}>No barcodes yet.</td></tr>}
+                    </tbody>
+                  </table>
                 </div>
-                <button type="submit">Stock In</button>
-              </form>
+
+                <h3>Stock In</h3>
+                <form className="form" onSubmit={onStockIn}>
+                  <div className="grid detail-grid">
+                    <label>
+                      Qty
+                      <input className="num" type="number" min={1} value={stockInQty} onChange={(e) => setStockInQty(Number(e.target.value))} />
+                    </label>
+                  </div>
+                  <button type="submit" disabled={!selectedProductId}>Stock In</button>
+                </form>
+              </div>
             </div>
 
             <div className="section">
@@ -576,7 +656,6 @@ export default function App() {
             </div>
 
             {productsError && <div className="error">{productsError}</div>}
-            {productsInfo && <div className="info">{productsInfo}</div>}
           </>
         )}
       </div>
