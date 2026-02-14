@@ -65,7 +65,29 @@ export default function App() {
 
       if (!response.ok) {
         const body = await response.text();
-        setError(body || 'Request failed.');
+        let message = body || 'Request failed.';
+
+        try {
+          const parsed = JSON.parse(body) as { error?: string; errors?: Record<string, string[]> };
+          if (parsed.error) {
+            message = parsed.error;
+          } else if (parsed.errors) {
+            const first = Object.values(parsed.errors).flat()[0];
+            if (first) {
+              message = first;
+            }
+          }
+        } catch {
+          // keep raw response text
+        }
+
+        setError(message);
+        setPreviewUrl((current) => {
+          if (current) {
+            URL.revokeObjectURL(current);
+          }
+          return null;
+        });
         return;
       }
 
