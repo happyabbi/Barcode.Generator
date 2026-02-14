@@ -505,8 +505,16 @@ export default function App() {
   return (
     <div className="page">
       <div className="card">
-        <h1>Barcode Generator + Product Manager</h1>
-        <p className="subtitle">Sprint 1.5 UX: flow-based product management layout.</p>
+        <div className="brand-header">
+          <div className="brand-left">
+            <div className="brand-logo">BG</div>
+            <div>
+              <h1>BarcodeOps Console</h1>
+              <p className="subtitle">Professional barcode + product workflow for retail teams.</p>
+            </div>
+          </div>
+          <div className="brand-badge">Local MVP</div>
+        </div>
 
         <div className="tabs">
           <button className={tab === 'barcode' ? 'tab active' : 'tab'} onClick={() => setTab('barcode')}>Barcode</button>
