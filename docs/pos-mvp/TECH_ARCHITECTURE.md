@@ -4,7 +4,8 @@
 
 - **Frontend**：React + Vite
 - **Backend**：ASP.NET Core Minimal API
-- **Database**：PostgreSQL
+- **Database（Phase 1）**：SQLite（單店 MVP）
+- **Database（Phase 2）**：PostgreSQL（多店/高併發）
 - **Barcode Engine**：既有 Barcode.Generator
 - **Deployment**：Frontend on Vercel, Backend on Render
 

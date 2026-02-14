@@ -75,7 +75,8 @@
 ## 風險與對策
 
 - **資料格式錯誤（條碼內容）**：後端格式驗證 + 前端提示
-- **高峰結帳競態**：checkout transaction + row-level lock
+- **SQLite 併發限制（初期可接受）**：啟用 WAL、縮短交易時間、先單店部署
+- **高峰結帳競態（成長期）**：切換 PostgreSQL + checkout transaction + row-level lock
 - **誤操作**：異動審計 + 權限分層
 
 ---

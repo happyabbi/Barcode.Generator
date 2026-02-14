@@ -4,12 +4,13 @@
 
 ## Sprint 1
 
-### 1) [DB] 建立 POS 核心 schema 與 migration
+### 1) [DB] 建立 POS 核心 schema 與 migration（SQLite-first）
 - Labels: `sprint-1`, `db`, `backend`
 - DoD:
   - migration 可執行/可回滾
   - 8 張核心表建立完成
   - 索引與 unique constraint 生效
+  - SQLite 啟用 WAL 模式與 busy_timeout
 
 ### 2) [API] Product CRUD
 - Labels: `sprint-1`, `backend`
