@@ -1,15 +1,18 @@
 using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace Barcode.Generator.Tests;
 
-public class DemoWebApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DemoWebApiIntegrationTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public DemoWebApiIntegrationTests(WebApplicationFactory<Program> factory)
+    public DemoWebApiIntegrationTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }
@@ -36,6 +39,30 @@ public class DemoWebApiIntegrationTests : IClassFixture<WebApplicationFactory<Pr
         var client = _factory.CreateClient();
 
         var response = await client.GetAsync("/generate?text=ABC-123&format=CODE_128&width=500&height=200");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/bmp", response.Content.Headers.ContentType?.MediaType);
+
+        var bytes = await response.Content.ReadAsByteArrayAsync();
+        Assert.True(bytes.Length > 2);
+        Assert.Equal((byte)'B', bytes[0]);
+        Assert.Equal((byte)'M', bytes[1]);
+    }
+
+    [Fact]
+    public async Task Generate_WithPostBody_ReturnsBmp()
+    {
+        var client = _factory.CreateClient();
+        var payload = JsonSerializer.Serialize(new
+        {
+            text = "post-content",
+            format = "QR_CODE",
+            width = 256,
+            height = 256
+        });
+
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/generate", content);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("image/bmp", response.Content.Headers.ContentType?.MediaType);
@@ -78,5 +105,41 @@ public class DemoWebApiIntegrationTests : IClassFixture<WebApplicationFactory<Pr
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("format", body);
+    }
+
+    [Fact]
+    public async Task Generate_WithPngOutput_ReturnsPng()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/generate?text=hello&imageFormat=png");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task Generate_WithSvgOutput_ReturnsSvg()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/generate?text=hello&imageFormat=svg");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("<svg", body);
+    }
+
+    [Fact]
+    public async Task Generate_ResponseContainsSecurityHeaders()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/generate?text=hello");
+
+        Assert.True(response.Headers.Contains("X-Content-Type-Options"));
+        Assert.True(response.Headers.Contains("X-Frame-Options"));
+        Assert.True(response.Headers.Contains("Referrer-Policy"));
     }
 }

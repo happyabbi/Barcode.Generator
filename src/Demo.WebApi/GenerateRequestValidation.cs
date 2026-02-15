@@ -44,6 +44,11 @@ public static class GenerateRequestValidation
         ValidateDimension("height", height, errors);
         ValidateFormat(format, errors);
 
+        if (!errors.ContainsKey("format") && !errors.ContainsKey("text"))
+        {
+            ValidateTextForFormat(text, ResolveFormat(format), errors);
+        }
+
         return errors;
     }
 
@@ -89,6 +94,42 @@ public static class GenerateRequestValidation
             [
                 $"format must be one of: {string.Join(", ", SupportedFormats.Select(x => x.ToString()))}."
             ];
+        }
+    }
+
+    private static void ValidateTextForFormat(string text, BarcodeFormat format, IDictionary<string, string[]> errors)
+    {
+        var isDigitsOnly = text.All(char.IsDigit);
+
+        switch (format)
+        {
+            case BarcodeFormat.EAN_13:
+                if (!isDigitsOnly || (text.Length != 12 && text.Length != 13))
+                {
+                    errors["text"] = ["EAN-13 requires 12 or 13 numeric digits."];
+                }
+                break;
+
+            case BarcodeFormat.EAN_8:
+                if (!isDigitsOnly || (text.Length != 7 && text.Length != 8))
+                {
+                    errors["text"] = ["EAN-8 requires 7 or 8 numeric digits."];
+                }
+                break;
+
+            case BarcodeFormat.UPC_A:
+                if (!isDigitsOnly || (text.Length != 11 && text.Length != 12))
+                {
+                    errors["text"] = ["UPC-A requires 11 or 12 numeric digits."];
+                }
+                break;
+
+            case BarcodeFormat.ITF:
+                if (!isDigitsOnly || text.Length % 2 != 0)
+                {
+                    errors["text"] = ["ITF requires an even number of numeric digits."];
+                }
+                break;
         }
     }
 }

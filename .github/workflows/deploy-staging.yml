@@ -1,0 +1,148 @@
+name: Deploy Staging Checks
+
+on:
+  push:
+    branches:
+      - feat/**
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  backend-build-test:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore src/Barcode.Generator.sln
+
+      - name: Build
+        run: dotnet build src/Barcode.Generator.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test src/Barcode.Generator.sln --configuration Release --no-build
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/Demo.Web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/Demo.Web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  frontend-preview:
+    name: Frontend Preview (optional)
+    runs-on: ubuntu-latest
+    needs: frontend-build
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: src/Demo.Web
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+      preview_status: ${{ steps.check-secrets.outputs.preview_status }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/Demo.Web/package-lock.json
+
+      - name: Verify Vercel secrets
+        id: check-secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.VERCEL_TOKEN }}" ] && missing+=("VERCEL_TOKEN")
+          [ -z "${{ secrets.VERCEL_ORG_ID }}" ] && missing+=("VERCEL_ORG_ID")
+          [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ] && missing+=("VERCEL_PROJECT_ID")
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "preview_status=skipped" >> "$GITHUB_OUTPUT"
+            echo "Missing secrets: ${missing[*]}. Preview deploy skipped."
+          else
+            echo "preview_status=enabled" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.check-secrets.outputs.preview_status == 'enabled'
+        run: npm ci
+
+      - name: Install Vercel CLI
+        if: steps.check-secrets.outputs.preview_status == 'enabled'
+        run: npm install --global vercel@latest
+
+      - name: Build and deploy preview
+        id: deploy
+        if: steps.check-secrets.outputs.preview_status == 'enabled'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=preview --token "$VERCEL_TOKEN"
+          vercel build --token "$VERCEL_TOKEN"
+          preview_url=$(vercel deploy --prebuilt --token "$VERCEL_TOKEN")
+          echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
+          echo "Preview URL: $preview_url"
+
+  preview-note:
+    name: PR Preview Note
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs:
+      - backend-build-test
+      - frontend-build
+      - frontend-preview
+    steps:
+      - name: Comment preview result
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const status = `${{ needs.frontend-preview.outputs.preview_status }}`;
+            const url = `${{ needs.frontend-preview.outputs.preview_url }}`;
+
+            let body = `✅ Staging checks passed.\n\n`;
+            if (status === 'enabled' && url) {
+              body += `Frontend preview deployed: ${url}`;
+            } else {
+              body += `Frontend preview not deployed (missing one or more Vercel secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID).`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

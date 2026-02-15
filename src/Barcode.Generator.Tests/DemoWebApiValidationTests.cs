@@ -64,6 +64,22 @@ public class DemoWebApiValidationTests
     }
 
     [Fact]
+    public void Validate_ShouldReject_InvalidEan13Text()
+    {
+        var errors = GenerateRequestValidation.Validate("Hello Barcode", null, null, "EAN_13");
+
+        Assert.True(errors.ContainsKey("text"));
+    }
+
+    [Fact]
+    public void Validate_ShouldAccept_ValidEan13Text()
+    {
+        var errors = GenerateRequestValidation.Validate("471234567890", null, null, "EAN_13");
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public void Validate_ShouldAccept_ValidRequestWithOptionalDimensions()
     {
         var errors = GenerateRequestValidation.Validate("hello", null, null, null);
