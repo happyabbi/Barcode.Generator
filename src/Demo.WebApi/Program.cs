@@ -362,6 +362,68 @@ api.MapGet("/inventory/low-stock", async (AppDbContext db) =>
     return Results.Ok(new { total = items.Count, items });
 });
 
+api.MapGet("/orders", async (int page, int pageSize, AppDbContext db) =>
+{
+    page = page <= 0 ? 1 : page;
+    pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
+
+    var query = db.SalesOrders.AsNoTracking().OrderByDescending(o => o.Id);
+    var total = await query.CountAsync();
+
+    var items = await query
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(o => new
+        {
+            o.Id,
+            o.OrderNo,
+            o.PaymentMethod,
+            o.Subtotal,
+            o.Discount,
+            o.Total,
+            o.PaidAmount,
+            o.ChangeAmount,
+            o.CreatedAt,
+            ItemCount = o.Items.Sum(i => i.Qty)
+        })
+        .ToListAsync();
+
+    return Results.Ok(new { page, pageSize, total, items });
+});
+
+api.MapGet("/orders/{id:guid}", async (Guid id, AppDbContext db) =>
+{
+    var order = await db.SalesOrders
+        .AsNoTracking()
+        .Where(o => o.Id == id)
+        .Select(o => new
+        {
+            o.Id,
+            o.OrderNo,
+            o.PaymentMethod,
+            o.Subtotal,
+            o.Discount,
+            o.Total,
+            o.PaidAmount,
+            o.ChangeAmount,
+            o.Note,
+            o.CreatedAt,
+            items = o.Items.Select(i => new
+            {
+                i.Id,
+                i.ProductId,
+                i.SkuSnapshot,
+                i.NameSnapshot,
+                i.UnitPrice,
+                i.Qty,
+                i.LineTotal
+            })
+        })
+        .FirstOrDefaultAsync();
+
+    return order == null ? Results.NotFound(new { error = "order not found." }) : Results.Ok(order);
+});
+
 api.MapPost("/checkout", async (CheckoutRequest request, AppDbContext db) =>
 {
     if (request.Items == null || request.Items.Count == 0)

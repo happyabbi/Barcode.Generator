@@ -204,4 +204,49 @@ public class PosApiIntegrationTests : IClassFixture<TestWebApplicationFactory>
         var resp = await response.Content.ReadAsStringAsync();
         Assert.Contains("insufficient", resp, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task OrdersEndpoints_ShouldReturnCheckoutOrder()
+    {
+        var client = _factory.CreateClient();
+
+        var products = await client.GetAsync("/api/products?page=1&pageSize=10");
+        products.EnsureSuccessStatusCode();
+
+        var body = await products.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var first = doc.RootElement.GetProperty("items")[0];
+        var productId = first.GetProperty("id").GetGuid();
+        var price = first.GetProperty("price").GetDecimal();
+
+        var checkoutPayload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { productId, qty = 1 } },
+            paymentMethod = "CASH",
+            paidAmount = price
+        });
+
+        using var checkoutContent = new StringContent(checkoutPayload, Encoding.UTF8, "application/json");
+        var checkoutResponse = await client.PostAsync("/api/checkout", checkoutContent);
+        checkoutResponse.EnsureSuccessStatusCode();
+
+        var checkoutBody = await checkoutResponse.Content.ReadAsStringAsync();
+        using var checkoutDoc = JsonDocument.Parse(checkoutBody);
+        var orderId = checkoutDoc.RootElement.GetProperty("id").GetGuid();
+
+        var listResponse = await client.GetAsync("/api/orders?page=1&pageSize=10");
+        listResponse.EnsureSuccessStatusCode();
+        var listBody = await listResponse.Content.ReadAsStringAsync();
+        using var listDoc = JsonDocument.Parse(listBody);
+
+        Assert.True(listDoc.RootElement.GetProperty("items").GetArrayLength() >= 1);
+
+        var detailResponse = await client.GetAsync($"/api/orders/{orderId}");
+        detailResponse.EnsureSuccessStatusCode();
+        var detailBody = await detailResponse.Content.ReadAsStringAsync();
+        using var detailDoc = JsonDocument.Parse(detailBody);
+
+        Assert.Equal(orderId, detailDoc.RootElement.GetProperty("id").GetGuid());
+        Assert.True(detailDoc.RootElement.GetProperty("items").GetArrayLength() >= 1);
+    }
 }
