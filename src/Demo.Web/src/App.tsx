@@ -38,6 +38,22 @@ type LowStockItem = {
   reorderLevel: number;
 };
 
+type PosCartItem = {
+  productId: string;
+  sku: string;
+  name: string;
+  price: number;
+  qtyOnHand: number;
+  qty: number;
+};
+
+type PosCheckoutResult = {
+  orderNo: string;
+  total: number;
+  paidAmount: number;
+  changeAmount: number;
+};
+
 type ProductSortKey = 'sku' | 'name' | 'price' | 'qtyOnHand';
 
 type ToastState = { type: 'success' | 'error'; message: string } | null;
@@ -73,7 +89,7 @@ function parseError(body: string): string {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<'barcode' | 'products'>('barcode');
+  const [tab, setTab] = useState<'barcode' | 'products' | 'pos'>('barcode');
   const [showCreateProduct, setShowCreateProduct] = useState(false);
 
   const [text, setText] = useState('Hello Barcode');
@@ -116,6 +132,15 @@ export default function App() {
   const [barcodes, setBarcodes] = useState<ProductBarcode[]>([]);
   const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
 
+  const [scanCode, setScanCode] = useState('');
+  const [cartItems, setCartItems] = useState<PosCartItem[]>([]);
+  const [discount, setDiscount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD'>('CASH');
+  const [paidAmount, setPaidAmount] = useState(0);
+  const [posError, setPosError] = useState<string | null>(null);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [lastCheckout, setLastCheckout] = useState<PosCheckoutResult | null>(null);
+
   const selectedProduct = useMemo(
     () => products.find((p) => p.id === selectedProductId) ?? null,
     [products, selectedProductId]
@@ -137,6 +162,13 @@ export default function App() {
     });
     return cloned;
   }, [products, sortAsc, sortKey]);
+
+  const posSubtotal = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0),
+    [cartItems]
+  );
+  const posTotal = useMemo(() => Math.max(posSubtotal - discount, 0), [posSubtotal, discount]);
+  const posChange = useMemo(() => Math.max(paidAmount - posTotal, 0), [paidAmount, posTotal]);
 
   useEffect(() => {
     if (!selectedProduct) return;
@@ -502,6 +534,137 @@ export default function App() {
     }
   };
 
+  const upsertCartItem = (item: PosCartItem) => {
+    setCartItems((current) => {
+      const index = current.findIndex((x) => x.productId === item.productId);
+      if (index < 0) return [...current, item];
+      const next = [...current];
+      next[index] = { ...next[index], qty: next[index].qty + item.qty };
+      return next;
+    });
+  };
+
+  const onScanToCart = async (event: FormEvent) => {
+    event.preventDefault();
+    setPosError(null);
+    const code = scanCode.trim();
+    if (!code) return;
+
+    try {
+      const response = await fetch(new URL(`/api/barcodes/${encodeURIComponent(code)}`, apiBaseUrl).toString());
+      const body = await response.text();
+      if (!response.ok) {
+        const err = parseError(body);
+        setPosError(err);
+        showError(err);
+        return;
+      }
+
+      const parsed = JSON.parse(body) as {
+        productId: string;
+        sku: string;
+        name: string;
+        price: number;
+        qtyOnHand: number;
+      };
+
+      upsertCartItem({
+        productId: parsed.productId,
+        sku: parsed.sku,
+        name: parsed.name,
+        price: parsed.price,
+        qtyOnHand: parsed.qtyOnHand,
+        qty: 1
+      });
+      setScanCode('');
+      setLastCheckout(null);
+      showSuccess(`Added ${parsed.sku} to cart.`);
+    } catch {
+      const err = 'Failed to scan barcode.';
+      setPosError(err);
+      showError(err);
+    }
+  };
+
+  const updateCartQty = (productId: string, qty: number) => {
+    setCartItems((current) => current
+      .map((item) => item.productId === productId ? { ...item, qty: Math.max(1, qty) } : item));
+  };
+
+  const removeFromCart = (productId: string) => {
+    setCartItems((current) => current.filter((item) => item.productId !== productId));
+  };
+
+  const onCheckout = async (event: FormEvent) => {
+    event.preventDefault();
+    setPosError(null);
+
+    if (!cartItems.length) {
+      const err = 'Cart is empty.';
+      setPosError(err);
+      showError(err);
+      return;
+    }
+
+    if (discount < 0 || discount > posSubtotal) {
+      const err = 'Discount is invalid.';
+      setPosError(err);
+      showError(err);
+      return;
+    }
+
+    if (paidAmount < posTotal) {
+      const err = 'Paid amount is insufficient.';
+      setPosError(err);
+      showError(err);
+      return;
+    }
+
+    if (paymentMethod === 'CARD' && Math.abs(paidAmount - posTotal) > 0.001) {
+      const err = 'For CARD payment, paid amount must equal total.';
+      setPosError(err);
+      showError(err);
+      return;
+    }
+
+    setIsCheckingOut(true);
+    try {
+      const response = await fetch(new URL('/api/checkout', apiBaseUrl).toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cartItems.map((item) => ({ productId: item.productId, qty: item.qty })),
+          paymentMethod,
+          paidAmount,
+          discount
+        })
+      });
+
+      const body = await response.text();
+      if (!response.ok) {
+        const err = parseError(body);
+        setPosError(err);
+        showError(err);
+        return;
+      }
+
+      const parsed = JSON.parse(body) as PosCheckoutResult;
+      setLastCheckout(parsed);
+      setCartItems([]);
+      setDiscount(0);
+      setPaidAmount(0);
+      showSuccess(`Checkout ${parsed.orderNo} completed.`);
+      await loadProducts();
+      await loadLowStock();
+    } catch {
+      const err = 'Checkout failed.';
+      setPosError(err);
+      showError(err);
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
+
   return (
     <div className="page">
       <div className="card">
@@ -519,6 +682,7 @@ export default function App() {
         <div className="tabs">
           <button className={tab === 'barcode' ? 'tab active' : 'tab'} onClick={() => setTab('barcode')}>Barcode</button>
           <button className={tab === 'products' ? 'tab active' : 'tab'} onClick={() => setTab('products')}>Products</button>
+          <button className={tab === 'pos' ? 'tab active' : 'tab'} onClick={() => setTab('pos')}>POS</button>
         </div>
 
         {toast && (
@@ -575,6 +739,97 @@ export default function App() {
                 Download BMP
               </a>
               <span className="api">API: {apiBaseUrl}</span>
+            </div>
+          </>
+        )}
+
+        {tab === 'pos' && (
+          <>
+            <div className="section header-row">
+              <h2>POS Checkout</h2>
+            </div>
+
+            <div className="products-layout">
+              <div className="left-panel">
+                <h3>Scan Barcode</h3>
+                <form className="form" onSubmit={onScanToCart}>
+                  <div className="row">
+                    <input value={scanCode} onChange={(e) => setScanCode(e.target.value)} placeholder="Scan or input barcode" />
+                    <button type="submit">Add</button>
+                  </div>
+                </form>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>SKU</th><th>Name</th><th>Price</th><th>Qty</th><th>Line Total</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                      {cartItems.map((item) => (
+                        <tr key={item.productId}>
+                          <td>{item.sku}</td>
+                          <td>{item.name}</td>
+                          <td>{item.price}</td>
+                          <td>
+                            <input
+                              className="num"
+                              type="number"
+                              min={1}
+                              value={item.qty}
+                              onChange={(e) => updateCartQty(item.productId, Number(e.target.value))}
+                            />
+                          </td>
+                          <td>{(item.price * item.qty).toFixed(2)}</td>
+                          <td><button className="mini-btn" type="button" onClick={() => removeFromCart(item.productId)}>Remove</button></td>
+                        </tr>
+                      ))}
+                      {!cartItems.length && <tr><td colSpan={6}>Cart is empty.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="right-panel">
+                <h3>Checkout</h3>
+                <form className="form" onSubmit={onCheckout}>
+                  <div className="grid detail-grid">
+                    <label>
+                      Discount
+                      <input className="num" type="number" min={0} step="0.01" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} />
+                    </label>
+                    <label>
+                      Payment Method
+                      <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as 'CASH' | 'CARD')}>
+                        <option value="CASH">CASH</option>
+                        <option value="CARD">CARD</option>
+                      </select>
+                    </label>
+                    <label>
+                      Paid Amount
+                      <input className="num" type="number" min={0} step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(Number(e.target.value))} />
+                    </label>
+                  </div>
+
+                  <div className="section">
+                    <div>Subtotal: {posSubtotal.toFixed(2)}</div>
+                    <div>Total: {posTotal.toFixed(2)}</div>
+                    <div>Change: {posChange.toFixed(2)}</div>
+                  </div>
+
+                  <button type="submit" disabled={isCheckingOut || !cartItems.length}>{isCheckingOut ? 'Checking out...' : 'Checkout'}</button>
+                </form>
+
+                {lastCheckout && (
+                  <div className="toast toast-success">
+                    <div>Order: {lastCheckout.orderNo}</div>
+                    <div>Total: {lastCheckout.total}</div>
+                    <div>Paid: {lastCheckout.paidAmount}</div>
+                    <div>Change: {lastCheckout.changeAmount}</div>
+                  </div>
+                )}
+
+                {posError && <div className="error">{posError}</div>}
+              </div>
             </div>
           </>
         )}
