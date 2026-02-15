@@ -8,11 +8,11 @@ using Xunit;
 
 namespace Barcode.Generator.Tests;
 
-public class DemoWebApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DemoWebApiIntegrationTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public DemoWebApiIntegrationTests(WebApplicationFactory<Program> factory)
+    public DemoWebApiIntegrationTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }
