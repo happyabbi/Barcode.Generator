@@ -94,6 +94,7 @@ export default function App() {
 
   const [text, setText] = useState('Hello Barcode');
   const [format, setFormat] = useState<BarcodeFormat>('QR_CODE');
+  const [imageFormat, setImageFormat] = useState<'bmp' | 'png' | 'svg'>('bmp');
   const [width, setWidth] = useState(300);
   const [height, setHeight] = useState(300);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -329,7 +330,7 @@ export default function App() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ text, format, width, height })
+        body: JSON.stringify({ text, format, imageFormat, width, height })
       });
 
       if (!response.ok) {
@@ -710,6 +711,15 @@ export default function App() {
                 </label>
 
                 <label>
+                  Output
+                  <select value={imageFormat} onChange={(e) => setImageFormat(e.target.value as 'bmp' | 'png' | 'svg')}>
+                    <option value="bmp">BMP</option>
+                    <option value="png">PNG</option>
+                    <option value="svg">SVG</option>
+                  </select>
+                </label>
+
+                <label>
                   Width
                   <input type="number" min={64} max={2048} value={width} onChange={(e) => setWidth(Number(e.target.value))} />
                 </label>
@@ -732,11 +742,11 @@ export default function App() {
             <div className="actions">
               <a
                 href={previewUrl ?? '#'}
-                download={`barcode-${format.toLowerCase()}.bmp`}
+                download={`barcode-${format.toLowerCase()}.${imageFormat}`}
                 className={`download ${previewUrl ? '' : 'disabled'}`}
                 onClick={(e) => !previewUrl && e.preventDefault()}
               >
-                Download BMP
+                Download {imageFormat.toUpperCase()}
               </a>
               <span className="api">API: {apiBaseUrl}</span>
             </div>

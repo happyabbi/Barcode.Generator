@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.RateLimiting;
 using Barcode.Generator;
 using Barcode.Generator.Common;
@@ -12,6 +13,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Formats.Png;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -86,18 +90,21 @@ app.Use(async (context, next) =>
 app.UseCors();
 app.UseRateLimiter();
 
-app.MapGet("/generate", (string text, int? width, int? height, string? format, ILoggerFactory loggerFactory) =>
-    GenerateBarcode(text, width, height, format, loggerFactory))
+app.MapGet("/generate", (string text, int? width, int? height, string? format, string? imageFormat, ILoggerFactory loggerFactory) =>
+    GenerateBarcode(text, width, height, format, imageFormat, loggerFactory))
     .RequireRateLimiting("generate");
 
 app.MapPost("/generate", (GenerateRequest request, ILoggerFactory loggerFactory) =>
-    GenerateBarcode(request.Text ?? string.Empty, request.Width, request.Height, request.Format, loggerFactory))
+    GenerateBarcode(request.Text ?? string.Empty, request.Width, request.Height, request.Format, request.ImageFormat, loggerFactory))
     .RequireRateLimiting("generate");
 
 var api = app.MapGroup("/api");
 
-api.MapPost("/products", async (CreateProductRequest request, AppDbContext db) =>
+api.MapPost("/products", async (HttpContext http, CreateProductRequest request, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager");
+    if (denied != null) return denied;
+
     if (string.IsNullOrWhiteSpace(request.Sku) || string.IsNullOrWhiteSpace(request.Name))
     {
         return Results.BadRequest(new { error = "sku and name are required." });
@@ -154,8 +161,11 @@ api.MapPost("/products", async (CreateProductRequest request, AppDbContext db) =
     });
 });
 
-api.MapGet("/products", async (string? keyword, int page, int pageSize, AppDbContext db) =>
+api.MapGet("/products", async (HttpContext http, string? keyword, int page, int pageSize, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     page = page <= 0 ? 1 : page;
     pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
 
@@ -191,8 +201,11 @@ api.MapGet("/products", async (string? keyword, int page, int pageSize, AppDbCon
     return Results.Ok(new { page, pageSize, total, items });
 });
 
-api.MapPut("/products/{id:guid}", async (Guid id, UpdateProductRequest request, AppDbContext db) =>
+api.MapPut("/products/{id:guid}", async (HttpContext http, Guid id, UpdateProductRequest request, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager");
+    if (denied != null) return denied;
+
     var product = await db.Products.Include(p => p.InventoryLevel).FirstOrDefaultAsync(p => p.Id == id && p.IsActive);
     if (product == null)
     {
@@ -215,8 +228,11 @@ api.MapPut("/products/{id:guid}", async (Guid id, UpdateProductRequest request, 
     return Results.Ok(new { message = "updated" });
 });
 
-api.MapPost("/products/{id:guid}/barcodes", async (Guid id, AddBarcodeRequest request, AppDbContext db) =>
+api.MapPost("/products/{id:guid}/barcodes", async (HttpContext http, Guid id, AddBarcodeRequest request, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager");
+    if (denied != null) return denied;
+
     var product = await db.Products.FirstOrDefaultAsync(p => p.Id == id && p.IsActive);
     if (product == null)
     {
@@ -264,8 +280,11 @@ api.MapPost("/products/{id:guid}/barcodes", async (Guid id, AddBarcodeRequest re
     });
 });
 
-api.MapGet("/products/{id:guid}/barcodes", async (Guid id, AppDbContext db) =>
+api.MapGet("/products/{id:guid}/barcodes", async (HttpContext http, Guid id, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     var items = await db.Barcodes
         .AsNoTracking()
         .Where(b => b.ProductId == id)
@@ -284,8 +303,11 @@ api.MapGet("/products/{id:guid}/barcodes", async (Guid id, AppDbContext db) =>
     return Results.Ok(new { items });
 });
 
-api.MapGet("/barcodes/{codeValue}", async (string codeValue, AppDbContext db) =>
+api.MapGet("/barcodes/{codeValue}", async (HttpContext http, string codeValue, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     var match = await db.Barcodes
         .AsNoTracking()
         .Include(b => b.Product)
@@ -314,8 +336,11 @@ api.MapGet("/barcodes/{codeValue}", async (string codeValue, AppDbContext db) =>
     });
 });
 
-api.MapPost("/inventory/in", async (StockInRequest request, AppDbContext db) =>
+api.MapPost("/inventory/in", async (HttpContext http, StockInRequest request, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager");
+    if (denied != null) return denied;
+
     if (request.Qty <= 0)
     {
         return Results.BadRequest(new { error = "qty must be > 0" });
@@ -342,8 +367,11 @@ api.MapPost("/inventory/in", async (StockInRequest request, AppDbContext db) =>
     return Results.Ok(new { productId = request.ProductId, qtyOnHand = level.QtyOnHand });
 });
 
-api.MapGet("/inventory/low-stock", async (AppDbContext db) =>
+api.MapGet("/inventory/low-stock", async (HttpContext http, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     var items = await db.InventoryLevels
         .AsNoTracking()
         .Include(i => i.Product)
@@ -362,8 +390,11 @@ api.MapGet("/inventory/low-stock", async (AppDbContext db) =>
     return Results.Ok(new { total = items.Count, items });
 });
 
-api.MapGet("/orders", async (int page, int pageSize, AppDbContext db) =>
+api.MapGet("/orders", async (HttpContext http, int page, int pageSize, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     page = page <= 0 ? 1 : page;
     pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
 
@@ -391,8 +422,11 @@ api.MapGet("/orders", async (int page, int pageSize, AppDbContext db) =>
     return Results.Ok(new { page, pageSize, total, items });
 });
 
-api.MapGet("/orders/{id:guid}", async (Guid id, AppDbContext db) =>
+api.MapGet("/orders/{id:guid}", async (HttpContext http, Guid id, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     var order = await db.SalesOrders
         .AsNoTracking()
         .Where(o => o.Id == id)
@@ -424,8 +458,11 @@ api.MapGet("/orders/{id:guid}", async (Guid id, AppDbContext db) =>
     return order == null ? Results.NotFound(new { error = "order not found." }) : Results.Ok(order);
 });
 
-api.MapPost("/checkout", async (CheckoutRequest request, AppDbContext db) =>
+api.MapPost("/checkout", async (HttpContext http, CheckoutRequest request, AppDbContext db) =>
 {
+    var denied = EnsureRole(http, "admin", "manager", "cashier");
+    if (denied != null) return denied;
+
     if (request.Items == null || request.Items.Count == 0)
     {
         return Results.BadRequest(new { error = "checkout items are required." });
@@ -645,7 +682,7 @@ static void SeedDemoData(AppDbContext db)
     db.SaveChanges();
 }
 
-static IResult GenerateBarcode(string text, int? width, int? height, string? format, ILoggerFactory loggerFactory)
+static IResult GenerateBarcode(string text, int? width, int? height, string? format, string? imageFormat, ILoggerFactory loggerFactory)
 {
     var validationErrors = GenerateRequestValidation.Validate(text, width, height, format);
     if (validationErrors.Count > 0)
@@ -670,6 +707,20 @@ static IResult GenerateBarcode(string text, int? width, int? height, string? for
     try
     {
         PixelData barcodeImage = barcodeWriter.Write(text);
+        var output = ResolveImageFormat(imageFormat);
+
+        if (output == "svg")
+        {
+            var svg = ToSvg(barcodeImage);
+            return Results.Text(svg, "image/svg+xml", Encoding.UTF8);
+        }
+
+        if (output == "png")
+        {
+            var pngBytes = ToPng(barcodeImage);
+            return Results.File(pngBytes, "image/png");
+        }
+
         byte[] bmpBytes = BitmapConverter.FromPixelData(barcodeImage);
         return Results.File(bmpBytes, "image/bmp");
     }
@@ -693,7 +744,57 @@ static IResult GenerateBarcode(string text, int? width, int? height, string? for
     }
 }
 
-public record GenerateRequest(string? Text, int? Width, int? Height, string? Format);
+static IResult? EnsureRole(HttpContext http, params string[] allowed)
+{
+    var role = (http.Request.Headers["X-Role"].FirstOrDefault() ?? "admin").Trim().ToLowerInvariant();
+    if (allowed.Any(x => x.Equals(role, StringComparison.OrdinalIgnoreCase)))
+    {
+        return null;
+    }
+
+    return Results.StatusCode(StatusCodes.Status403Forbidden);
+}
+
+static string ResolveImageFormat(string? imageFormat)
+{
+    var value = (imageFormat ?? "bmp").Trim().ToLowerInvariant();
+    return value is "bmp" or "png" or "svg" ? value : "bmp";
+}
+
+static byte[] ToPng(PixelData pixelData)
+{
+    using var image = Image.LoadPixelData<Rgba32>(pixelData.Pixels, pixelData.Width, pixelData.Height);
+    using var ms = new MemoryStream();
+    image.Save(ms, new PngEncoder());
+    return ms.ToArray();
+}
+
+static string ToSvg(PixelData pixelData)
+{
+    var sb = new StringBuilder();
+    sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {pixelData.Width} {pixelData.Height}\" shape-rendering=\"crispEdges\">\n");
+    sb.Append($"<rect width=\"{pixelData.Width}\" height=\"{pixelData.Height}\" fill=\"white\"/>\n");
+
+    for (var y = 0; y < pixelData.Height; y++)
+    {
+        for (var x = 0; x < pixelData.Width; x++)
+        {
+            var idx = (y * pixelData.Width + x) * 4;
+            var r = pixelData.Pixels[idx];
+            var g = pixelData.Pixels[idx + 1];
+            var b = pixelData.Pixels[idx + 2];
+            if (r < 128 || g < 128 || b < 128)
+            {
+                sb.Append($"<rect x=\"{x}\" y=\"{y}\" width=\"1\" height=\"1\" fill=\"black\"/>\n");
+            }
+        }
+    }
+
+    sb.Append("</svg>");
+    return sb.ToString();
+}
+
+public record GenerateRequest(string? Text, int? Width, int? Height, string? Format, string? ImageFormat);
 public record CreateProductRequest(string Sku, string Name, string? Category, decimal Price, decimal Cost, int InitialQty = 0, int ReorderLevel = 10);
 public record UpdateProductRequest(string? Name, string? Category, decimal? Price, decimal? Cost, int? ReorderLevel);
 public record AddBarcodeRequest(string Format, string CodeValue, bool IsPrimary = false);

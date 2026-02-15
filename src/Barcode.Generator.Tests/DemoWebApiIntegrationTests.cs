@@ -108,6 +108,30 @@ public class DemoWebApiIntegrationTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task Generate_WithPngOutput_ReturnsPng()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/generate?text=hello&imageFormat=png");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task Generate_WithSvgOutput_ReturnsSvg()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/generate?text=hello&imageFormat=svg");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("<svg", body);
+    }
+
+    [Fact]
     public async Task Generate_ResponseContainsSecurityHeaders()
     {
         var client = _factory.CreateClient();

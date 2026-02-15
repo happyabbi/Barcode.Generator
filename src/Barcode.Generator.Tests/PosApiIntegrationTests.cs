@@ -249,4 +249,45 @@ public class PosApiIntegrationTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(orderId, detailDoc.RootElement.GetProperty("id").GetGuid());
         Assert.True(detailDoc.RootElement.GetProperty("items").GetArrayLength() >= 1);
     }
+
+    [Fact]
+    public async Task CashierRole_CannotCreateProduct_ButCanCheckout()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Role", "cashier");
+
+        var createPayload = JsonSerializer.Serialize(new
+        {
+            sku = "SKU-ROLE-001",
+            name = "Role Test",
+            category = "Test",
+            price = 99,
+            cost = 60,
+            initialQty = 1,
+            reorderLevel = 1
+        });
+
+        using var createContent = new StringContent(createPayload, Encoding.UTF8, "application/json");
+        var createResponse = await client.PostAsync("/api/products", createContent);
+        Assert.Equal(HttpStatusCode.Forbidden, createResponse.StatusCode);
+
+        var products = await client.GetAsync("/api/products?page=1&pageSize=10");
+        products.EnsureSuccessStatusCode();
+        var productsBody = await products.Content.ReadAsStringAsync();
+        using var productsDoc = JsonDocument.Parse(productsBody);
+        var first = productsDoc.RootElement.GetProperty("items")[0];
+        var productId = first.GetProperty("id").GetGuid();
+        var price = first.GetProperty("price").GetDecimal();
+
+        var checkoutPayload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { productId, qty = 1 } },
+            paymentMethod = "CASH",
+            paidAmount = price
+        });
+
+        using var checkoutContent = new StringContent(checkoutPayload, Encoding.UTF8, "application/json");
+        var checkoutResponse = await client.PostAsync("/api/checkout", checkoutContent);
+        Assert.Equal(HttpStatusCode.OK, checkoutResponse.StatusCode);
+    }
 }
