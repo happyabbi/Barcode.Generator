@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }) => {
   ];
 
   const productBarcodes = new Map<string, Array<{ id: string; productId: string; format: string; codeValue: string; isPrimary: boolean }>>();
+  productBarcodes.set('p-1', [{ id: 'b-seed-1', productId: 'p-1', format: 'CODE_128', codeValue: 'DEMO-001', isPrimary: true }]);
 
   await page.route('**/api/products?**', async (route) => {
     const url = new URL(route.request().url());
@@ -138,6 +139,90 @@ test.beforeEach(async ({ page }) => {
 
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
+
+  await page.route('**/api/barcodes/*', async (route) => {
+    const codeValue = decodeURIComponent(route.request().url().split('/api/barcodes/')[1] ?? '');
+    const matched = Array.from(productBarcodes.entries())
+      .flatMap(([productId, list]) => list.map((b) => ({ productId, ...b })))
+      .find((b) => b.codeValue === codeValue);
+
+    if (!matched) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'barcode not found.' }) });
+      return;
+    }
+
+    const product = products.find((p) => p.id === matched.productId);
+    if (!product) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'product not found.' }) });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        productId: product.id,
+        sku: product.sku,
+        name: product.name,
+        price: product.price,
+        qtyOnHand: product.qtyOnHand,
+        barcode: { format: matched.format, codeValue: matched.codeValue }
+      })
+    });
+  });
+
+  await page.route('**/api/checkout', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as {
+      items: Array<{ productId: string; qty: number }>;
+      paymentMethod: 'CASH' | 'CARD';
+      paidAmount: number;
+      discount?: number;
+    };
+
+    const discount = payload.discount ?? 0;
+    let subtotal = 0;
+
+    for (const item of payload.items) {
+      const product = products.find((p) => p.id === item.productId);
+      if (!product) {
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'product not found.' }) });
+        return;
+      }
+      if (product.qtyOnHand < item.qty) {
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: `insufficient stock for ${product.sku}.` }) });
+        return;
+      }
+      subtotal += product.price * item.qty;
+    }
+
+    const total = Math.max(subtotal - discount, 0);
+    if (payload.paidAmount < total) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'paid amount is insufficient.' }) });
+      return;
+    }
+
+    if (payload.paymentMethod === 'CARD' && Math.abs(payload.paidAmount - total) > 0.001) {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'for CARD payment, paid amount must equal total.' }) });
+      return;
+    }
+
+    for (const item of payload.items) {
+      const product = products.find((p) => p.id === item.productId)!;
+      product.qtyOnHand -= item.qty;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'order-1',
+        orderNo: 'SO20260215210000001',
+        total,
+        paidAmount: payload.paidAmount,
+        changeAmount: payload.paymentMethod === 'CASH' ? payload.paidAmount - total : 0
+      })
+    });
+  });
 });
 
 async function inputsStayInsideLabels(page: Page, selector: string) {
@@ -201,4 +286,24 @@ test('products flow: search, update, add barcode, and stock in', async ({ page }
   await page.locator('.right-panel').getByRole('button', { name: 'Stock In' }).click();
   await expect(page.getByText('Stock in +7 completed.')).toBeVisible();
   await expect(page.getByRole('cell', { name: '19' })).toBeVisible();
+});
+
+test('pos checkout flow: scan, cart, discount and checkout', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'POS' }).click();
+
+  await page.getByPlaceholder('Scan or input barcode').fill('DEMO-001');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('Added SKU-001 to cart.')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'SKU-001' })).toBeVisible();
+
+  await page.locator('label', { hasText: 'Discount' }).locator('input').fill('9');
+  await page.locator('label', { hasText: 'Payment Method' }).locator('select').selectOption('CASH');
+  await page.locator('label', { hasText: 'Paid Amount' }).locator('input').fill('100');
+
+  await page.getByRole('button', { name: 'Checkout' }).click();
+  await expect(page.getByText('Checkout SO20260215210000001 completed.')).toBeVisible();
+  await expect(page.getByText('Order: SO20260215210000001')).toBeVisible();
+  await expect(page.getByText('Total: 90')).toBeVisible();
+  await expect(page.getByText('Change: 10')).toBeVisible();
 });
