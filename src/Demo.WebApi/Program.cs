@@ -361,6 +361,168 @@ api.MapGet("/inventory/low-stock", async (AppDbContext db) =>
     return Results.Ok(new { total = items.Count, items });
 });
 
+api.MapPost("/checkout", async (CheckoutRequest request, AppDbContext db) =>
+{
+    if (request.Items == null || request.Items.Count == 0)
+    {
+        return Results.BadRequest(new { error = "checkout items are required." });
+    }
+
+    var paymentMethod = (request.PaymentMethod ?? string.Empty).Trim().ToUpperInvariant();
+    if (paymentMethod != "CASH" && paymentMethod != "CARD")
+    {
+        return Results.BadRequest(new { error = "payment method must be CASH or CARD." });
+    }
+
+    if (request.Items.Any(i => i.Qty <= 0))
+    {
+        return Results.BadRequest(new { error = "qty must be > 0." });
+    }
+
+    var grouped = request.Items
+        .GroupBy(i => i.ProductId)
+        .Select(g => new { ProductId = g.Key, Qty = g.Sum(x => x.Qty) })
+        .ToList();
+
+    await using var tx = await db.Database.BeginTransactionAsync();
+
+    var productIds = grouped.Select(x => x.ProductId).ToList();
+    var products = await db.Products
+        .Include(p => p.InventoryLevel)
+        .Where(p => p.IsActive && productIds.Contains(p.Id))
+        .ToListAsync();
+
+    if (products.Count != productIds.Count)
+    {
+        return Results.BadRequest(new { error = "one or more products not found." });
+    }
+
+    var subtotal = 0m;
+    var orderItems = new List<SalesOrderItem>();
+
+    foreach (var item in grouped)
+    {
+        var product = products.First(p => p.Id == item.ProductId);
+        var level = product.InventoryLevel;
+        if (level == null)
+        {
+            return Results.BadRequest(new { error = $"inventory missing for {product.Sku}." });
+        }
+
+        if (level.QtyOnHand < item.Qty)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"insufficient stock for {product.Sku}.",
+                productId = product.Id,
+                sku = product.Sku,
+                qtyOnHand = level.QtyOnHand,
+                requestedQty = item.Qty
+            });
+        }
+
+        var lineTotal = Math.Round(product.Price * item.Qty, 2, MidpointRounding.AwayFromZero);
+        subtotal += lineTotal;
+
+        orderItems.Add(new SalesOrderItem
+        {
+            ProductId = product.Id,
+            SkuSnapshot = product.Sku,
+            NameSnapshot = product.Name,
+            UnitPrice = product.Price,
+            Qty = item.Qty,
+            LineTotal = lineTotal
+        });
+    }
+
+    var discount = Math.Round(request.Discount ?? 0m, 2, MidpointRounding.AwayFromZero);
+    if (discount < 0)
+    {
+        return Results.BadRequest(new { error = "discount must be >= 0." });
+    }
+
+    var total = Math.Round(subtotal - discount, 2, MidpointRounding.AwayFromZero);
+    if (total < 0)
+    {
+        return Results.BadRequest(new { error = "discount cannot exceed subtotal." });
+    }
+
+    var paidAmount = Math.Round(request.PaidAmount, 2, MidpointRounding.AwayFromZero);
+    if (paidAmount < total)
+    {
+        return Results.BadRequest(new { error = "paid amount is insufficient." });
+    }
+
+    var changeAmount = paymentMethod == "CASH"
+        ? Math.Round(paidAmount - total, 2, MidpointRounding.AwayFromZero)
+        : 0m;
+
+    if (paymentMethod == "CARD" && paidAmount != total)
+    {
+        return Results.BadRequest(new { error = "for CARD payment, paid amount must equal total." });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var orderNo = $"SO{now:yyyyMMddHHmmssfff}";
+
+    var order = new SalesOrder
+    {
+        OrderNo = orderNo,
+        PaymentMethod = paymentMethod,
+        Subtotal = subtotal,
+        Discount = discount,
+        Total = total,
+        PaidAmount = paidAmount,
+        ChangeAmount = changeAmount,
+        Note = request.Note,
+        CreatedAt = now,
+        Items = orderItems
+    };
+
+    db.SalesOrders.Add(order);
+
+    foreach (var item in grouped)
+    {
+        var product = products.First(p => p.Id == item.ProductId);
+        var level = product.InventoryLevel!;
+        level.QtyOnHand -= item.Qty;
+        level.UpdatedAt = now;
+
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            ProductId = product.Id,
+            MovementType = "OUT",
+            Qty = item.Qty,
+            Reason = $"Checkout {orderNo}"
+        });
+    }
+
+    await db.SaveChangesAsync();
+    await tx.CommitAsync();
+
+    return Results.Ok(new
+    {
+        order.Id,
+        order.OrderNo,
+        order.PaymentMethod,
+        order.Subtotal,
+        order.Discount,
+        order.Total,
+        order.PaidAmount,
+        order.ChangeAmount,
+        itemCount = order.Items.Sum(i => i.Qty),
+        items = order.Items.Select(i => new
+        {
+            i.ProductId,
+            i.SkuSnapshot,
+            i.NameSnapshot,
+            i.UnitPrice,
+            i.Qty,
+            i.LineTotal
+        })
+    });
+});
+
 app.Run();
 
 static void SeedDemoData(AppDbContext db)
@@ -473,5 +635,7 @@ public record CreateProductRequest(string Sku, string Name, string? Category, de
 public record UpdateProductRequest(string? Name, string? Category, decimal? Price, decimal? Cost, int? ReorderLevel);
 public record AddBarcodeRequest(string Format, string CodeValue, bool IsPrimary = false);
 public record StockInRequest(Guid ProductId, int Qty, string? Reason);
+public record CheckoutRequest(List<CheckoutItemRequest> Items, string PaymentMethod, decimal PaidAmount, decimal? Discount = null, string? Note = null);
+public record CheckoutItemRequest(Guid ProductId, int Qty);
 
 public partial class Program { }

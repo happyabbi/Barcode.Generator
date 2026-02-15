@@ -108,4 +108,100 @@ public class PosApiIntegrationTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(sku, found.GetProperty("sku").GetString());
         Assert.Equal(5, found.GetProperty("qtyOnHand").GetInt32());
     }
+
+    [Fact]
+    public async Task Checkout_WithEnoughStockAndCash_ShouldCreateOrderAndDeductInventory()
+    {
+        var client = _factory.CreateClient();
+        var products = await client.GetAsync("/api/products?page=1&pageSize=10");
+        products.EnsureSuccessStatusCode();
+
+        var body = await products.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var first = doc.RootElement.GetProperty("items")[0];
+        var productId = first.GetProperty("id").GetGuid();
+        var price = first.GetProperty("price").GetDecimal();
+        var qtyBefore = first.GetProperty("qtyOnHand").GetInt32();
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { productId, qty = 1 } },
+            paymentMethod = "CASH",
+            paidAmount = price + 10,
+            discount = 0
+        });
+
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/checkout", content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var checkoutBody = await response.Content.ReadAsStringAsync();
+        using var checkoutDoc = JsonDocument.Parse(checkoutBody);
+        Assert.StartsWith("SO", checkoutDoc.RootElement.GetProperty("orderNo").GetString());
+        Assert.Equal(price, checkoutDoc.RootElement.GetProperty("total").GetDecimal());
+
+        var afterRes = await client.GetAsync($"/api/products?page=1&pageSize=10&keyword={first.GetProperty("sku").GetString()}");
+        afterRes.EnsureSuccessStatusCode();
+        var afterBody = await afterRes.Content.ReadAsStringAsync();
+        using var afterDoc = JsonDocument.Parse(afterBody);
+        var qtyAfter = afterDoc.RootElement.GetProperty("items")[0].GetProperty("qtyOnHand").GetInt32();
+
+        Assert.Equal(qtyBefore - 1, qtyAfter);
+    }
+
+    [Fact]
+    public async Task Checkout_WithInsufficientStock_ShouldReturnBadRequest()
+    {
+        var client = _factory.CreateClient();
+        var products = await client.GetAsync("/api/products?page=1&pageSize=10");
+        products.EnsureSuccessStatusCode();
+
+        var body = await products.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var first = doc.RootElement.GetProperty("items")[0];
+        var productId = first.GetProperty("id").GetGuid();
+        var qtyOnHand = first.GetProperty("qtyOnHand").GetInt32();
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { productId, qty = qtyOnHand + 999 } },
+            paymentMethod = "CASH",
+            paidAmount = 999999
+        });
+
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/checkout", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var resp = await response.Content.ReadAsStringAsync();
+        Assert.Contains("insufficient stock", resp, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Checkout_WithInsufficientPayment_ShouldReturnBadRequest()
+    {
+        var client = _factory.CreateClient();
+        var products = await client.GetAsync("/api/products?page=1&pageSize=10");
+        products.EnsureSuccessStatusCode();
+
+        var body = await products.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var first = doc.RootElement.GetProperty("items")[0];
+        var productId = first.GetProperty("id").GetGuid();
+        var price = first.GetProperty("price").GetDecimal();
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            items = new[] { new { productId, qty = 1 } },
+            paymentMethod = "CASH",
+            paidAmount = price - 0.01m
+        });
+
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/api/checkout", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var resp = await response.Content.ReadAsStringAsync();
+        Assert.Contains("insufficient", resp, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -50,3 +50,33 @@ public class InventoryMovement
     public string? Reason { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+public class SalesOrder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string OrderNo { get; set; } = string.Empty;
+    public string PaymentMethod { get; set; } = "CASH";
+    public decimal Subtotal { get; set; }
+    public decimal Discount { get; set; }
+    public decimal Total { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal ChangeAmount { get; set; }
+    public string? Note { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public List<SalesOrderItem> Items { get; set; } = [];
+}
+
+public class SalesOrderItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SalesOrderId { get; set; }
+    public SalesOrder SalesOrder { get; set; } = default!;
+    public Guid ProductId { get; set; }
+    public Product Product { get; set; } = default!;
+    public string SkuSnapshot { get; set; } = string.Empty;
+    public string NameSnapshot { get; set; } = string.Empty;
+    public decimal UnitPrice { get; set; }
+    public int Qty { get; set; }
+    public decimal LineTotal { get; set; }
+}

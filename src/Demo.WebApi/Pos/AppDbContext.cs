@@ -12,6 +12,8 @@ public class AppDbContext : DbContext
     public DbSet<BarcodeEntry> Barcodes => Set<BarcodeEntry>();
     public DbSet<InventoryLevel> InventoryLevels => Set<InventoryLevel>();
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
+    public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
+    public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -33,6 +35,38 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Product>()
             .Property(p => p.Cost)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrder>()
+            .HasIndex(o => o.OrderNo)
+            .IsUnique();
+
+        modelBuilder.Entity<SalesOrder>()
+            .Property(o => o.Subtotal)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrder>()
+            .Property(o => o.Discount)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrder>()
+            .Property(o => o.Total)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrder>()
+            .Property(o => o.PaidAmount)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrder>()
+            .Property(o => o.ChangeAmount)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrderItem>()
+            .Property(i => i.UnitPrice)
+            .HasPrecision(12, 2);
+
+        modelBuilder.Entity<SalesOrderItem>()
+            .Property(i => i.LineTotal)
             .HasPrecision(12, 2);
     }
 }
